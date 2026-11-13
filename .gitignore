@@ -10,6 +10,17 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 密钥与环境变量（绝不可入库）
+.env
+.env.*
+*.key
+*.pem
+api_key*
+gpustack.env
 
 # 编辑器/系统
 .vscode/
