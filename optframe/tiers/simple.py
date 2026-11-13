@@ -87,6 +87,7 @@ def run_simple_tier(
     repeat: int = 50,
     device: str = "cuda",
     require_ci: bool = True,
+    flush_cache: bool = True,
 ) -> TierOutcome:
     task = load_task(task_or_dir) if isinstance(task_or_dir, (str, Path)) else task_or_dir
     workdir = Path(workdir) if workdir else (task.dir / "runs" / "simple")
@@ -95,7 +96,8 @@ def run_simple_tier(
     if inputs is None:
         inputs = task.make_inputs(device=device)
     baseline_fn = baseline_fn or measure_baseline
-    baseline = baseline_fn(task, inputs, warmup=warmup, repeat=repeat)
+    baseline = baseline_fn(task, inputs, warmup=warmup, repeat=repeat,
+                           flush_cache=flush_cache)
 
     ledger = ledger or Ledger(workdir / "ledger.jsonl", run_id=task.name)
     ledger.append(
@@ -104,6 +106,7 @@ def run_simple_tier(
         task=task.name,
         generator="torch-reference",
         payload={"ref_ms": round(baseline.ms, 6)},
+        cache_policy=baseline.cache_policy,
     )
 
     evaluate_fn = evaluate_fn or evaluate_candidate
@@ -148,7 +151,7 @@ def run_simple_tier(
 
             result = evaluate_fn(
                 task, cand, baseline, inputs, workdir,
-                warmup=warmup, repeat=repeat,
+                warmup=warmup, repeat=repeat, flush_cache=flush_cache,
             )
             passed = _passes(result)
             ledger.append(
@@ -158,6 +161,7 @@ def run_simple_tier(
                 generator=cand.generator,
                 candidate_sha=cand.sha,
                 payload=result.to_dict(),
+                cache_policy=result.cache_policy,
             )
 
             if result.correct:

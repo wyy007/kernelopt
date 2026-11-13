@@ -97,6 +97,17 @@ def test_ledger_roundtrip(tmp_path):
         json.loads(line)
 
 
+def test_result_carries_timing_policy():
+    """Result 必须自带口径：默认 cold + cuda_event（见 contracts/README.md）。"""
+    r = Result(correct=True, ratio=1.02)
+    d = r.to_dict()
+    assert d["cache_policy"] == "cold"
+    assert d["timer"] == "cuda_event"
+
+    warm = Result(correct=True, ratio=1.02, cache_policy="warm").to_dict()
+    assert warm["cache_policy"] == "warm"
+
+
 def test_ledger_records_cache_policy(tmp_path):
     """口径必须入账：默认 cold，显式值原样保留，非法值拒绝（见 contracts/README.md）。"""
     ledger = Ledger(tmp_path / "l.jsonl", run_id="r1")

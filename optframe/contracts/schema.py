@@ -55,6 +55,10 @@ class Result:
     ratio_low: Optional[float] = None
     ratio_high: Optional[float] = None
     pairs: int = 0
+    #: 计时口径：cold（每次冲 L2）/ warm（不冲）。见 contracts/README.md
+    cache_policy: str = "cold"
+    #: 计时来源：cuda_event（验收用）/ profiler（仅限占比分析）
+    timer: str = "cuda_event"
     max_abs_err: Optional[float] = None
     status: str = "unknown"           # ok | incorrect | runtime_error | import_error | rejected
     error: str = ""
@@ -69,6 +73,8 @@ class Result:
             "ratio_low": None if self.ratio_low is None else round(self.ratio_low, 4),
             "ratio_high": None if self.ratio_high is None else round(self.ratio_high, 4),
             "pairs": self.pairs,
+            "cache_policy": self.cache_policy,
+            "timer": self.timer,
             "max_abs_err": None if self.max_abs_err is None else float(self.max_abs_err),
             "status": self.status,
             "error": self.error,

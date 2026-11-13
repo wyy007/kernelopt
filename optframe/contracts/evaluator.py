@@ -26,6 +26,8 @@ class Baseline:
     ms: float = 0.0
     #: 基线可调用对象，用于交错 A/B 计时（可选）
     fn: Optional[Any] = None
+    #: 基线计时口径，与候选对齐后才能算比值
+    cache_policy: str = "cold"
 
 
 def measure_baseline(
@@ -34,12 +36,15 @@ def measure_baseline(
     *,
     warmup: int = 10,
     repeat: int = 50,
+    flush_cache: bool = True,
 ) -> Baseline:
     """以 reference(PyTorch) 为基线，产出真值输出与中位耗时。"""
     fn = resolve_callable(task.reference_module, task.reference_spec)
     outputs = fn(*inputs)
-    ms = time_ms(lambda: fn(*inputs), warmup=warmup, repeat=repeat)
-    return Baseline(outputs=outputs, ms=ms, fn=lambda: fn(*inputs))
+    ms = time_ms(lambda: fn(*inputs), warmup=warmup, repeat=repeat, flush_cache=flush_cache)
+    return Baseline(outputs=outputs, ms=ms,
+                    fn=lambda: fn(*inputs),
+                    cache_policy="cold" if flush_cache else "warm")
 
 
 def evaluate_candidate(
@@ -52,6 +57,7 @@ def evaluate_candidate(
     warmup: int = 10,
     repeat: int = 50,
     forbid_torch: bool = True,
+    flush_cache: bool = True,
 ) -> Result:
     """完整评测一个候选，返回统一口径的 Result。"""
     workdir = Path(workdir)
@@ -139,7 +145,8 @@ def evaluate_candidate(
     try:
         if baseline.fn is not None:
             ref_samples, cand_samples = time_pair_samples(
-                baseline.fn, lambda: run(*inputs), warmup=warmup, repeat=repeat
+                baseline.fn, lambda: run(*inputs), warmup=warmup, repeat=repeat,
+                flush_cache=flush_cache,
             )
             ref_ms = float(median(ref_samples))
             ms = float(median(cand_samples))
@@ -154,7 +161,8 @@ def evaluate_candidate(
             ratio_point = float(median(paired)) if paired else None
         else:
             ref_ms = baseline.ms
-            ms = time_ms(lambda: run(*inputs), warmup=warmup, repeat=repeat)
+            ms = time_ms(lambda: run(*inputs), warmup=warmup, repeat=repeat,
+                         flush_cache=flush_cache)
             ratio_low, ratio_high, pairs = None, None, 0
             ratio_point = None
     except Exception as exc:  # noqa: BLE001
@@ -171,6 +179,8 @@ def evaluate_candidate(
         ratio_low=ratio_low,
         ratio_high=ratio_high,
         pairs=pairs,
+        cache_policy="cold" if flush_cache else "warm",
+        timer="cuda_event",
         max_abs_err=check.get("max_abs_err"),
         status="ok",
         artifacts={

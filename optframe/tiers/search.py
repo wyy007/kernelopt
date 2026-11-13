@@ -177,6 +177,7 @@ def run_search(
             generator=cand.generator,
             candidate_sha=cand.sha,
             payload={**result.to_dict(), "block": variant.block, "warps": variant.warps},
+            cache_policy=result.cache_policy,
         )
 
         if result.correct and result.ratio is not None:
