@@ -99,9 +99,11 @@ def enrich(
         hint = next(
             (h for h in candidates if (h.m_min >= 8) == prefer_prefill), candidates[0]
         )
-        if hint.avg_flops <= 0:
-            continue
         if finding.gpu_time_ms <= 0:
+            continue
+        # 纯访存算子（拷贝/重排）：FLOPs=0，只能按带宽判，不能因为没 FLOPs 就放弃
+        bytes_only = hint.avg_flops <= 0
+        if bytes_only and hint.avg_bytes <= 0:
             continue
 
         seconds = finding.gpu_time_ms / 1000.0
@@ -115,12 +117,15 @@ def enrich(
         crossover = (
             peak_tflops * 1e12 / (peak_bw_gbs * 1e9) if peak_bw_gbs > 0 else float("inf")
         )
-        memory_bound = peak_bw_gbs > 0 and ai < crossover
+        memory_bound = bytes_only or (peak_bw_gbs > 0 and ai < crossover)
 
         if memory_bound:
-            sol = min(gbs / peak_bw_gbs * 100.0, 100.0)
+            sol = min(gbs / peak_bw_gbs * 100.0, 100.0) if peak_bw_gbs > 0 else 0.0
             bound = "memory"
-            detail = f"{gbs:.0f} GB/s / {peak_bw_gbs:.0f} GB/s（算术强度 {ai:.1f} < 平衡点 {crossover:.1f}）"
+            if bytes_only:
+                detail = f"{gbs:.0f} GB/s / {peak_bw_gbs:.0f} GB/s（纯访存，无 FLOPs）"
+            else:
+                detail = f"{gbs:.0f} GB/s / {peak_bw_gbs:.0f} GB/s（算术强度 {ai:.1f} < 平衡点 {crossover:.1f}）"
         else:
             sol = min(tflops / peak_tflops * 100.0, 100.0)
             bound = "compute"
@@ -135,9 +140,10 @@ def enrich(
         finding.sol_pct_raw = sol
         finding.tflops = tflops
         finding.confidence = "derived"
-        finding.category = "GEMM"
+        if not bytes_only:
+            finding.category = "GEMM"
         finding.evidence.setdefault("notes", []).append(
-            f"shape 来自 kernel API 日志（{hint.source or 'n/a'}）："
+            f"shape 来自 kernel API 日志/配置推导（{hint.source or 'n/a'}）："
             f"{len(hint.shapes)} 种形状，{hint.calls} 次调用，"
             f"形状组={hint.tag or 'n/a'}(M {hint.m_min}-{hint.m_max})，每次 {per_call_ms*1000:.0f}µs；"
             f"按调用次数加权平均 {hint.avg_flops/1e9:.2f} GFLOP/call、"

@@ -271,6 +271,44 @@ def test_shape_hints_marks_eligible_when_headroom_exists():
     assert f.estimated_gain_pct == pytest.approx(36.0)  # 40 * (1-0.1)
 
 
+def test_shape_hints_handle_pure_copy_kernel():
+    """纯访存算子（FLOPs=0）也要能判：按带宽算 SOL，不能直接跳过。"""
+    from optframe.analysis.kernel_shapes import ShapeHint, enrich
+    from optframe.analysis.schema import Finding
+
+    f = Finding(op="cuLaunchKernelEx->fused_qkvzba_split_reshape", shape="",
+                dtype="bf16", gpu_time_ms=10.0, pct_e2e=3.7,
+                bound_type="unknown", confidence="inconclusive", count=100,
+                category="elementwise")
+    # 每次 25MB，100 次 = 2.5GB；10ms → 250 GB/s
+    hint = ShapeHint(match="qkvzba", avg_flops=0.0, avg_bytes=25e6,
+                     shapes=[[512, 0, 0]], calls=100, source="config+grid derived")
+
+    enrich([f], [hint], peak_tflops=100.0, peak_bw_gbs=1000.0)
+
+    assert f.bound_type == "memory"
+    assert f.sol_pct == pytest.approx(25.0)      # 250/1000
+    assert f.confidence == "derived"
+    assert f.category == "elementwise"            # 不被改写成 GEMM
+    assert any("纯访存" in n for n in f.evidence["notes"])
+
+
+def test_shape_hints_skip_when_no_flops_and_no_bytes():
+    """FLOPs 与 bytes 都缺时不应该造出 SOL。"""
+    from optframe.analysis.kernel_shapes import ShapeHint, enrich
+    from optframe.analysis.schema import Finding
+
+    f = Finding(op="unknown_kernel", shape="", dtype="bf16", gpu_time_ms=10.0,
+                pct_e2e=3.0, bound_type="unknown", confidence="inconclusive", count=10)
+    hint = ShapeHint(match="unknown_kernel", avg_flops=0.0, avg_bytes=0.0,
+                     shapes=[[1, 0, 0]], calls=10)
+
+    enrich([f], [hint], peak_tflops=100.0, peak_bw_gbs=1000.0)
+
+    assert f.bound_type == "unknown"
+    assert f.sol_pct is None
+
+
 def test_profiled_sol_does_not_queue_task_by_default():
     """profiler 窗口的时间有放大，默认不允许据此排任务。"""
     from optframe.analysis.kernel_shapes import ShapeHint, enrich

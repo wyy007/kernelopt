@@ -103,7 +103,7 @@ INCONCLUSIVE ⇔ 区间跨越门限
 
 1. **冷缓存不等于真实 serving**：真实推理里权重被多请求轮换，介于冷热之间。冷缓存是**上界口径**（对 Triton 有利），报告时要说清楚；
 2. **小 batch 会被固定开销淹没**：GDN decode 在 B≤16 时耗时 77–79µs 不随 batch 变化，属于延迟受限，此时 SOL 低不代表有空间；
-3. **纯访存算子目前判不了**：`kernel_shapes.enrich` 里有 `if hint.avg_flops <= 0: continue`，FLOPs 为 0 的拷贝类算子会被跳过（待修）；
+3. **纯访存算子按带宽判**：`kernel_shapes.enrich` 对 FLOPs=0 且 bytes>0 的算子走纯带宽分支（2026-11-13 修复），不再跳过；两侧都缺才跳过；
 4. **profiler 窗口的时间会被放大**：只有占比可用，且需要在报告里注明。
 
 ---
