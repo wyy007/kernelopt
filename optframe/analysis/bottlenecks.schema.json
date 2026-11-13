@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://optframe.local/schemas/bottlenecks.schema.json",
+  "title": "optframe bottlenecks report",
+  "type": "object",
+  "required": ["schema_version", "run_id", "generated_at", "source", "target", "summary", "findings"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "type": "string", "const": "1.0" },
+    "run_id": { "type": "string", "minLength": 1 },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "source": {
+      "type": "object",
+      "required": ["trace", "arch"],
+      "properties": {
+        "trace": { "type": "string", "minLength": 1 },
+        "arch": { "type": "string", "minLength": 1 },
+        "perf_report_dir": { "type": "string" },
+        "report_csv_dir": { "type": "string" },
+        "tracelens_commit": { "type": ["string", "null"] },
+        "phase_hint": { "enum": ["prefill", "decode", "mixed", "unknown"] }
+      }
+    },
+    "target": {
+      "type": "object",
+      "properties": {
+        "hardware": { "type": "string" },
+        "framework": { "type": "string" },
+        "model": { "type": "string" }
+      }
+    },
+    "params": {
+      "type": "object",
+      "properties": {
+        "min_pct_e2e": { "type": "number", "minimum": 0 },
+        "near_roofline_pct": { "type": "number", "minimum": 0, "maximum": 100 },
+        "sol_clamp": { "type": "number", "minimum": 0 },
+        "ncu_used": { "type": "boolean" }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["total_gpu_ms", "gpu_busy_pct", "idle_pct", "candidates", "excluded"],
+      "properties": {
+        "total_gpu_ms": { "type": "number", "minimum": 0 },
+        "gpu_busy_pct": { "type": "number", "minimum": 0, "maximum": 100 },
+        "idle_pct": { "type": "number", "minimum": 0, "maximum": 100 },
+        "exposed_comm_pct": { "type": "number", "minimum": 0, "maximum": 100 },
+        "top_bottleneck": { "type": ["string", "null"] },
+        "top_bottleneck_pct_e2e": { "type": ["number", "null"] },
+        "candidates": { "type": "integer", "minimum": 0 },
+        "excluded": { "type": "integer", "minimum": 0 },
+        "gain_ceiling_pct": { "type": "number", "minimum": 0 },
+        "by_action": { "type": "object" },
+        "by_bound": { "type": "object" }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "op", "shape", "dtype", "gpu_time_ms", "pct_e2e", "bound_type",
+          "confidence", "recommended_action", "suggested_owner", "eligible", "evidence"
+        ],
+        "properties": {
+          "op": { "type": "string", "minLength": 1 },
+          "kernel": { "type": ["string", "null"] },
+          "shape": { "type": "string" },
+          "dtype": { "type": "string" },
+          "category": { "type": "string" },
+          "gpu_time_ms": { "type": "number", "minimum": 0 },
+          "pct_e2e": { "type": "number", "minimum": 0, "maximum": 100 },
+          "count": { "type": "integer", "minimum": 0 },
+          "mean_kernel_us": { "type": ["number", "null"] },
+          "bound_type": { "enum": ["compute", "memory", "latency", "launch", "comm", "unknown"] },
+          "sol_pct": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+          "sol_pct_raw": { "type": ["number", "null"] },
+          "tflops": { "type": ["number", "null"] },
+          "confidence": { "enum": ["measured", "derived", "heuristic", "inconclusive"] },
+          "recommended_action": { "enum": ["tune", "fuse", "backend", "precision", "investigate"] },
+          "suggested_owner": { "enum": ["kernel", "framework", "serving"] },
+          "eligible": { "type": "boolean" },
+          "excluded_reason": { "type": ["string", "null"] },
+          "estimated_gain_pct": { "type": "number", "minimum": 0 },
+          "impact_score": { "type": "number", "minimum": 0 },
+          "evidence": {
+            "type": "object",
+            "required": ["trace"],
+            "properties": {
+              "trace": { "type": ["string", "null"] },
+              "report_csv": { "type": "string" },
+              "report_csv_dir": { "type": "string" },
+              "ncu": { "type": ["object", "null"] },
+              "notes": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    }
+  }
+}

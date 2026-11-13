@@ -1,0 +1,22 @@
+# 实验产物与运行目录（不入库）
+runs/
+.artifacts/
+cache/
+logs/*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 编辑器/系统
+.vscode/
+.idea/
+.DS_Store
+
+# 模型与权重
+*.safetensors
+*.bin
+*.pt
