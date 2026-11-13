@@ -14,6 +14,11 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+#: 允许的计时口径。见 contracts/README.md：不声明口径的加速比不可信。
+#: cold = 每次计时前冲 L2（默认，最接近 serving）；warm = 权重常驻 L2；
+#: profiler = 来自 torch profiler 的时间（只能用于占比，不能作为验收依据）。
+CACHE_POLICIES = ("cold", "warm", "profiler")
+
 
 class Ledger:
     def __init__(self, path: str | Path, run_id: str):
@@ -30,7 +35,12 @@ class Ledger:
         task: str = "",
         generator: str = "",
         candidate_sha: Optional[str] = None,
+        cache_policy: str = "cold",
     ) -> Dict[str, Any]:
+        if cache_policy not in CACHE_POLICIES:
+            raise ValueError(
+                f"cache_policy 必须是 {CACHE_POLICIES} 之一，收到 {cache_policy!r}"
+            )
         record = {
             "ts": round(time.time(), 3),
             "run_id": self.run_id,
@@ -38,6 +48,7 @@ class Ledger:
             "task": task,
             "generator": generator,
             "candidate_sha": candidate_sha,
+            "cache_policy": cache_policy,
             "verdict": verdict,
             **payload,
         }

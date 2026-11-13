@@ -97,6 +97,26 @@ def test_ledger_roundtrip(tmp_path):
         json.loads(line)
 
 
+def test_ledger_records_cache_policy(tmp_path):
+    """口径必须入账：默认 cold，显式值原样保留，非法值拒绝（见 contracts/README.md）。"""
+    ledger = Ledger(tmp_path / "l.jsonl", run_id="r1")
+    ledger.append(stage="candidate", verdict=Verdict.KEEP.value, payload={"ratio": 1.02})
+    ledger.append(stage="candidate", verdict=Verdict.KEEP.value,
+                  payload={"ratio": 1.02}, cache_policy="warm")
+
+    records = ledger.read()
+    assert records[0]["cache_policy"] == "cold"
+    assert records[1]["cache_policy"] == "warm"
+
+    try:
+        ledger.append(stage="candidate", verdict=Verdict.KEEP.value,
+                      payload={}, cache_policy="lukewarm")
+    except ValueError as exc:
+        assert "cache_policy" in str(exc)
+    else:
+        raise AssertionError("非法 cache_policy 应抛 ValueError")
+
+
 def test_load_task_from_generated_layout(tmp_path):
     task_dir = tmp_path / "silu__8x8"
     task_dir.mkdir()

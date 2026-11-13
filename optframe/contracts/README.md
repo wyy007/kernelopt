@@ -111,7 +111,7 @@ INCONCLUSIVE ⇔ 区间跨越门限
 ## 7. 与其他契约的关系
 
 - `evaluator.py`：正确性 → 冷缓存交错 A/B → bootstrap CI → 判定；
-- `ledger.py`：每条记录应能回溯到上面的字段（建议后续补 `cache_policy` 字段）；
+- `ledger.py`：每条记录都带 `cache_policy`（`cold` / `warm` / `profiler`，默认 `cold`，非法值直接抛错）；
 - `source_guard.py`：拒绝"改计时/改 judge/绕输入"的伪优化。
 
 **核心原则：宁可报 INCONCLUSIVE，也不要报一个不带口径的加速比。**
