@@ -145,3 +145,16 @@
 | 3 | `tiers/fusion.py`：复用 simple 的 best-of-N / 重试 / CI | 无 |
 | 4 | `delivery` 第二张注册表 + 调度顺序 + 互斥开关 | 需回归 §6.1 |
 | 5 | e2e 验证：融合 region 开关 A/B，CI 下界 > 1.015 才算成立 | 需回归 §6.1 |
+
+### 5.8 真正的元凶：评测环境与服务的 torch 版本不一致
+
+2026-11-16 定稿：融合档在**宿主机 venv**（torch 2.10）里跑，基线 `torch.mm` 报 7.55ms、ratio 0.95；
+在**sglang-debug 容器**（torch 2.13，与服务同环境）里跑，同一份基线报 8.87ms、ratio **1.1016**、判定 KEEP。
+
+差的 17% 全部来自 torch/cuBLAS 版本，与被测 kernel 无关。结论：
+
+> **评测必须在与服务相同的运行时里执行**（容器内的 python，而不是宿主机 venv），
+> 否则基线漂移足以翻转结论。
+
+已落地：`tools/swiglu_service_baseline.py`（预分配 + `out=`，跨进程确定性），
+容器内一次真实链路的结果为 `ratio=1.1016, CI 下界=1.1006, contribution=3.15% e2e`。
