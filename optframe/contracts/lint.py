@@ -19,10 +19,24 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
+import os
+
 from .source_guard import detect_disallowed_torch
 
-#: Blackwell / Ada 单 block 可用共享内存上限（保守取 227KB）
-SMEM_LIMIT_BYTES = 227 * 1024
+
+def smem_limit_bytes() -> int:
+    """当前生效的共享内存上限（可被 OPTFRAME_SMEM_LIMIT 覆盖）。"""
+    try:
+        override = int(os.environ.get("OPTFRAME_SMEM_LIMIT", "0") or 0)
+    except ValueError:
+        override = 0
+    return override or SMEM_LIMIT_BYTES
+
+#: 单 block 可用共享内存上限的**保守默认值**。
+#: 2026-11-16 实测：RTX PRO 5000 上 Triton 报 "Hardware limit: 101376"，比硬件 opt-in 的
+#: 227KB 小得多（Triton 自己扣掉了预留），所以默认按 96KB 卡，避免"lint 通过、运行时 OOM"。
+#: 需要放宽时用环境变量 OPTFRAME_SMEM_LIMIT 覆盖。
+SMEM_LIMIT_BYTES = 96 * 1024
 #: 允许的 tile 尺寸范围（Triton 实测可用区间）
 BLOCK_MIN, BLOCK_MAX = 16, 8192
 VALID_WARPS = {1, 2, 4, 8, 16, 32}
@@ -238,12 +252,14 @@ def _check_smem(tiles: Dict[str, int], consts: Dict[str, int], report: LintRepor
     # 双缓冲 A/B tile，bf16 按 2 字节估算（fp8 会更小，属于保守估计）
     per_stage = (bm * bk + bk * bn) * 2
     total = per_stage * max(1, stages)
-    if total > SMEM_LIMIT_BYTES:
+    limit = smem_limit_bytes()
+    if total > limit:
         report.errors.append(Violation(
             code="smem_overflow",
             message=(
                 f"估算共享内存 {total / 1024:.0f} KB（BLOCK_M={bm}, BLOCK_N={bn}, "
-                f"BLOCK_K={bk}, stages={stages}）超过上限 {SMEM_LIMIT_BYTES / 1024:.0f} KB"
+                f"BLOCK_K={bk}, stages={stages}）超过上限 {limit / 1024:.0f} KB；"
+                "调小 BLOCK 或 num_stages"
             ),
             witness={"per_stage_kb": round(per_stage / 1024, 1), "stages": stages},
         ))

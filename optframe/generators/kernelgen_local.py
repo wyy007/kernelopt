@@ -60,6 +60,19 @@ def run(*args):
 '''
 
 
+#: 融合算子的语义说明：模型必须知道"融的是什么"，否则会照形状瞎猜
+_FUSED_SEMANTICS = {
+    "fused::swiglu": (
+        "融合语义（必须在同一个 Triton kernel 内完成，禁止 torch.mm）：\n"
+        "  1) full = x @ w，其中 x 形状 (M, K)，w 形状 (K, 2H)；\n"
+        "  2) 把 full 按列切成两半：gate = full[:, :H]，up = full[:, H:]；\n"
+        "  3) 输出 out = silu(gate) * up，形状 (M, H)。\n"
+        "  提示：可以先分别累加 gate/up 两个 tile（双累加器），或把 w 的列按 "
+        "[g0,u0,g1,u1,...] 交错读取后单累加器处理。"
+    ),
+}
+
+
 def build_prompt(task: Task, context: GenContext, prompt_mode: str = "default") -> str:
     shape_desc = "; ".join(
         f"args[{i}]: shape={dims}, dtype={task.dtype_name}" for i, dims in enumerate(task.shapes)
@@ -71,6 +84,9 @@ def build_prompt(task: Task, context: GenContext, prompt_mode: str = "default") 
         "",
         "请实现与 PyTorch 语义等价的 Triton kernel，并暴露 run(*args)。",
     ]
+    semantics = _FUSED_SEMANTICS.get(getattr(task, "op", ""))
+    if semantics:
+        lines.extend(["", semantics])
     if prompt_mode == "strict":
         lines.extend([
             "",

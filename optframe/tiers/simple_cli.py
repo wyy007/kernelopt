@@ -83,9 +83,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         module = load_module(Path(mod_path), alias="prod_baseline")
         fn = resolve_callable(module, args.baseline_module)
 
-        def baseline_fn(task, inputs, warmup=10, repeat=50):  # noqa: F811
+        def baseline_fn(task, inputs, warmup=10, repeat=50, flush_cache=True):  # noqa: F811
             outputs = fn(*inputs)
-            ms = time_ms(lambda: fn(*inputs), warmup=warmup, repeat=repeat)
+            ms = time_ms(lambda: fn(*inputs), warmup=warmup, repeat=repeat,
+                         flush_cache=flush_cache)
             # 带上可调用对象，让 evaluator 能做交错 A/B 与置信区间
             return Baseline(outputs=outputs, ms=ms, fn=lambda: fn(*inputs))
 

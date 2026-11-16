@@ -94,11 +94,18 @@ class Task:
     ops: List[str] = field(default_factory=list)
     #: 融合区域标识，用于回灌时声明独占
     region: Optional[str] = None
+    #: 该任务覆盖的端到端份额（%），来自 task.toml 的 [trace] 段
+    pct_e2e: Optional[float] = None
     raw: Dict[str, Any] = field(default_factory=dict)
 
     # ---- 惰性加载 ----
     _reference_module: Optional[ModuleType] = None
     _judge_module: Optional[ModuleType] = None
+
+    @property
+    def coverage_pct(self) -> float:
+        """该任务覆盖的 e2e 份额（未知时按 0 计，仅影响收益归因展示）。"""
+        return float(self.pct_e2e or 0.0)
 
     @property
     def is_fused(self) -> bool:
@@ -178,6 +185,8 @@ def load_task(task_dir: str | Path) -> Task:
         category=str(block.get("category", "other")),
         allow_complex=bool((data.get("escalation") or {}).get("allow_complex", False)),
         kind=kind,
+        pct_e2e=(None if (data.get("trace") or {}).get("pct_e2e") is None
+                 else float(data["trace"]["pct_e2e"])),
         ops=[str(x) for x in block.get("ops", [])],
         region=None if block.get("region") is None else str(block["region"]),
         raw=data,
