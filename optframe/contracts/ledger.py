@@ -17,7 +17,7 @@ from typing import Any, Dict, Iterable, List, Optional
 #: 允许的计时口径。见 contracts/README.md：不声明口径的加速比不可信。
 #: cold = 每次计时前冲 L2（默认，最接近 serving）；warm = 权重常驻 L2；
 #: profiler = 来自 torch profiler 的时间（只能用于占比，不能作为验收依据）。
-CACHE_POLICIES = ("cold", "warm", "profiler")
+CACHE_POLICIES = ("cold", "warm", "profiler", "n/a")  # n/a: 未计时记录（如静态检查）
 
 
 class Ledger:

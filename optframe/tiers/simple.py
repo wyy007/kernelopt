@@ -16,6 +16,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from ..contracts.evaluator import Baseline, evaluate_candidate, measure_baseline
 from ..contracts.ledger import Ledger
+from ..contracts.lint import format_violations, lint_source
 from ..contracts.schema import Candidate, Result, Verdict
 from ..contracts.task import Task, load_task
 from ..generators.base import GenContext, Generator
@@ -88,6 +89,7 @@ def run_simple_tier(
     device: str = "cuda",
     require_ci: bool = True,
     flush_cache: bool = True,
+    lint: bool = True,
 ) -> TierOutcome:
     task = load_task(task_or_dir) if isinstance(task_or_dir, (str, Path)) else task_or_dir
     workdir = Path(workdir) if workdir else (task.dir / "runs" / "simple")
@@ -148,6 +150,39 @@ def run_simple_tier(
                     payload={"error": err[:400]},
                 )
                 continue
+
+            # 上 GPU 之前先做静态检查：能定位的问题不该花一次评测的成本
+            lint_report = lint_source(
+                cand.source,
+                shapes=getattr(task, "shapes", None),
+                dtype=getattr(task, "dtype_name", None),
+                language=cand.language,
+            ) if lint else None
+            if lint_report is not None and not lint_report.ok:
+                detail = format_violations(lint_report)
+                err = detail[:600]
+                record.errors.append(err[:400])
+                errors.append(err)
+                ledger.append(
+                    stage="candidate",
+                    verdict=Verdict.INVALID.value,
+                    task=task.name,
+                    generator=cand.generator,
+                    candidate_sha=cand.sha,
+                    payload={"phase": "lint", "lint": lint_report.to_dict()},
+                    cache_policy="n/a",
+                )
+                continue
+            if lint_report is not None and lint_report.warnings:
+                ledger.append(
+                    stage="candidate",
+                    verdict="LINT_WARN",
+                    task=task.name,
+                    generator=cand.generator,
+                    candidate_sha=cand.sha,
+                    payload={"phase": "lint", "lint": lint_report.to_dict()},
+                    cache_policy="n/a",
+                )
 
             result = evaluate_fn(
                 task, cand, baseline, inputs, workdir,

@@ -179,9 +179,23 @@ def run(ref_out, cand_out, dtype=None, atol=None, rtol=None):
         if diff.numel():
             max_rel_err = max(max_rel_err, float((diff / denom).max().item()))
         if not torch.allclose(cand_f, ref_f, atol=atol, rtol=rtol, equal_nan=True):
+            # 见证式反馈：给出第一个最大误差的位置与两侧数值，而不只是"失败了"
+            flat = diff.reshape(-1)
+            pos = int(flat.argmax().item()) if flat.numel() else 0
+            coord = []
+            rem = pos
+            for dim in reversed(tuple(ref.shape)):
+                coord.append(rem % int(dim))
+                rem //= int(dim)
+            coord = tuple(reversed(coord))
             return {{
                 "ok": False,
-                "error": "allclose failed",
+                "error": (
+                    f"allclose failed at index {{coord}}: "
+                    f"ref={{float(ref_f[coord]):.6g}} cand={{float(cand_f[coord]):.6g}} "
+                    f"abs_err={{float(diff[coord]):.6g}} (atol={{atol}}, rtol={{rtol}})"
+                ),
+                "index": list(coord),
                 "atol": atol,
                 "rtol": rtol,
                 "max_abs_err": max_abs_err,

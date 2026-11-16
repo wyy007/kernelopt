@@ -111,7 +111,46 @@ INCONCLUSIVE ⇔ 区间跨越门限
 ## 7. 与其他契约的关系
 
 - `evaluator.py`：正确性 → 冷缓存交错 A/B → bootstrap CI → 判定；
-- `ledger.py`：每条记录都带 `cache_policy`（`cold` / `warm` / `profiler`，默认 `cold`，非法值直接抛错）与 `timer`（`cuda_event` / `profiler`）；口径由 `evaluator` 的 `flush_cache` 参数产生，不靠调用方记；
+- `ledger.py`：每条记录都带 `cache_policy`（`cold` / `warm` / `profiler` / `n/a`，默认 `cold`；`n/a` 表示未计时的记录，如静态检查；非法值直接抛错）与 `timer`（`cuda_event` / `profiler`）；口径由 `evaluator` 的 `flush_cache` 参数产生，不靠调用方记；
 - `source_guard.py`：拒绝"改计时/改 judge/绕输入"的伪优化。
 
 **核心原则：宁可报 INCONCLUSIVE，也不要报一个不带口径的加速比。**
+
+---
+
+## 8. 静态检查（lint）与见证式反馈
+
+上 GPU 之前先跑 `contracts/lint.py`：能在编译期判定的问题不该花一次评测的成本，而且反馈要能定位。
+
+### 检查项
+
+| code | 级别 | 判据 |
+| --- | --- | --- |
+| `syntax_error` | error | `ast.parse` 失败 |
+| `run_missing` / `run_no_return` | error | 没有 `run(*args)`，或有但没有 return |
+| `run_arity` | error | `run` 位置参数个数与任务输入张量数不一致（有 `*args` 时不判） |
+| `import_*_missing` | error | 缺 `torch` / `triton` / `triton.language as tl` |
+| `jit_missing` | error | 没有 `@triton.jit` kernel |
+| `mask_missing` | error | 形状不被 BLOCK 整除，但源码里没有任何 `mask=` |
+| `smem_overflow` | error | 估算 `(BM·BK + BK·BN)·2·stages` 超过 227KB |
+| `warps_invalid` | error | `num_warps ∉ {1,2,4,8,16,32}` |
+| `torch_compute` | error | 调用了 `torch.mm` 等计算算子（复用 `source_guard`） |
+| `acc_dtype_unclear` | warning | 用了 `tl.dot` 但没有 `tl.float32` 累加 |
+| `block_not_power_of_two` | warning | BLOCK 不是 2 的幂 |
+
+### 见证格式
+
+失败不是一句话，而是可定位的反例，直接进重试 prompt：
+
+```
+[mask_missing] 第 42 行: kernel 里没有 `mask=`，而 M=7835 不是 BLOCK_M=128 的整数倍，最后一块会越界读/写
+  见证: M=7835, BLOCK_M=128, 余数=27, 越界行区间=[7808, 7963)
+```
+
+judge 侧同理：`allclose` 失败时返回首个最大误差的坐标与两侧数值（`index` 字段），不再只有 `allclose failed`。
+
+### 落点
+
+- `tiers/simple.py`：候选进 `evaluate_fn` 之前先 lint；`errors` 非空 → 记 `INVALID`（`phase=lint`, `cache_policy=n/a`）并进重试队列，不占 GPU；
+- `warnings` 单独记一条 `LINT_WARN`，只留痕不阻断；
+- `run_simple_tier(..., lint=False)` 可关闭（供编排测试使用）。

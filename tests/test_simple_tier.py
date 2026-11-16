@@ -61,6 +61,7 @@ def test_keep_when_first_round_wins(tmp_path):
         baseline_fn=lambda *a, **k: Baseline(outputs=[], ms=1.0),
         evaluate_fn=lambda *a, **k: make_result(1.25),
         workdir=tmp_path / "runs",
+        lint=False,
     )
     assert outcome.verdict == "KEEP"
     assert outcome.best_ratio == pytest.approx(1.25)
@@ -76,6 +77,7 @@ def test_revert_then_escalate(tmp_path):
         baseline_fn=lambda *a, **k: Baseline(outputs=[], ms=1.0),
         evaluate_fn=lambda *a, **k: make_result(0.9),
         workdir=tmp_path / "runs",
+        lint=False,
     )
     assert outcome.verdict == "REVERT"
     assert len(outcome.rounds) == 2
@@ -96,6 +98,7 @@ def test_retry_recovers_in_second_round(tmp_path):
         baseline_fn=lambda *a, **k: Baseline(outputs=[], ms=1.0),
         evaluate_fn=evaluate,
         workdir=tmp_path / "runs",
+        lint=False,
     )
     assert outcome.verdict == "KEEP"
     assert len(outcome.rounds) == 2
@@ -110,6 +113,7 @@ def test_incorrect_candidate_not_kept(tmp_path):
         baseline_fn=lambda *a, **k: Baseline(outputs=[], ms=1.0),
         evaluate_fn=lambda *a, **k: make_result(None, correct=False),
         workdir=tmp_path / "runs",
+        lint=False,
     )
     assert outcome.verdict == "REVERT"
     assert outcome.best_ratio is None
@@ -123,6 +127,7 @@ def test_empty_candidate_recorded_as_invalid(tmp_path):
         baseline_fn=lambda *a, **k: Baseline(outputs=[], ms=1.0),
         evaluate_fn=lambda *a, **k: make_result(1.5),
         workdir=tmp_path / "runs",
+        lint=False,
     )
     assert outcome.verdict == "REVERT"
 
@@ -141,6 +146,7 @@ def test_noise_floor_blocks_tiny_gain(tmp_path):
         baseline_fn=lambda *a, **k: Baseline(outputs=[], ms=1.0),
         evaluate_fn=lambda *a, **k: make_result(1.01),
         workdir=tmp_path / "runs",
+        lint=False,
     )
     assert outcome.verdict == "REVERT"   # 1.01 < 1.02 噪声门限
 
@@ -154,6 +160,7 @@ def test_ci_low_blocks_keep(tmp_path):
         baseline_fn=lambda *a, **k: Baseline(outputs=[], ms=1.0),
         evaluate_fn=lambda *a, **k: make_result(1.08, ratio_low=0.99),
         workdir=tmp_path / "runs",
+        lint=False,
     )
     assert outcome.verdict == "REVERT"
 
@@ -166,6 +173,7 @@ def test_ci_can_be_disabled_for_debug(tmp_path):
         baseline_fn=lambda *a, **k: Baseline(outputs=[], ms=1.0),
         evaluate_fn=lambda *a, **k: make_result(1.08, ratio_low=0.99),
         workdir=tmp_path / "runs",
+        lint=False,
         require_ci=False,
     )
     assert outcome.verdict == "KEEP"
@@ -179,9 +187,32 @@ def test_ledger_contains_baseline_and_candidates(tmp_path):
         baseline_fn=lambda *a, **k: Baseline(outputs=[], ms=2.0),
         evaluate_fn=lambda *a, **k: make_result(1.1),
         workdir=tmp_path / "runs",
+        lint=False,
     )
     from optframe.contracts.ledger import Ledger
     records = Ledger(tmp_path / "runs" / "ledger.jsonl", run_id="x").read()
     assert records[0]["stage"] == "baseline"
     assert records[0]["ref_ms"] == 2.0
     assert len([r for r in records if r["stage"] == "candidate"]) == 2
+
+
+def test_lint_blocks_gpu_evaluation(tmp_path):
+    """静态检查不过的候选不应该占用一次 GPU 评测。"""
+    from optframe.contracts.ledger import Ledger
+
+    task = FakeTask(tmp_path)
+    gen = FakeGenerator([["this is not a kernel"]])
+    called = []
+
+    run_simple_tier(
+        task, gen, n=1, rounds=1, inputs=[],
+        baseline_fn=lambda *a, **k: Baseline(outputs=[], ms=2.0),
+        evaluate_fn=lambda *a, **k: called.append(1),
+        workdir=tmp_path / "runs_lint",
+    )
+
+    assert called == [], "lint 未通过仍然调用了评测"
+    records = Ledger(tmp_path / "runs_lint" / "ledger.jsonl", run_id="x").read()
+    bad = [r for r in records if r.get("verdict") == "INVALID"]
+    assert bad and bad[0]["phase"] == "lint"
+    assert bad[0]["cache_policy"] == "n/a"
