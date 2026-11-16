@@ -88,11 +88,21 @@ class Task:
     judge_spec: str = "judge.py:run"
     category: str = "other"
     allow_complex: bool = False
+    #: "single"（单算子）或 "fused"（算子融合）。默认单算子，旧任务包不用改。
+    kind: str = "single"
+    #: 融合任务覆盖的算子序列（单算子模式为空）
+    ops: List[str] = field(default_factory=list)
+    #: 融合区域标识，用于回灌时声明独占
+    region: Optional[str] = None
     raw: Dict[str, Any] = field(default_factory=dict)
 
     # ---- 惰性加载 ----
     _reference_module: Optional[ModuleType] = None
     _judge_module: Optional[ModuleType] = None
+
+    @property
+    def is_fused(self) -> bool:
+        return self.kind == "fused"
 
     @property
     def dtype(self) -> torch.dtype:
@@ -151,6 +161,10 @@ def load_task(task_dir: str | Path) -> Task:
         if required not in block:
             raise TaskError(f"task.toml missing task.{required}")
 
+    kind = str(block.get("kind", "single"))
+    if kind not in ("single", "fused"):
+        raise TaskError(f"unsupported task.kind: {kind!r} (expected single|fused)")
+
     return Task(
         dir=task_dir,
         name=str(block["name"]),
@@ -163,5 +177,8 @@ def load_task(task_dir: str | Path) -> Task:
         judge_spec=str(block.get("judge", "judge.py:run")),
         category=str(block.get("category", "other")),
         allow_complex=bool((data.get("escalation") or {}).get("allow_complex", False)),
+        kind=kind,
+        ops=[str(x) for x in block.get("ops", [])],
+        region=None if block.get("region") is None else str(block["region"]),
         raw=data,
     )

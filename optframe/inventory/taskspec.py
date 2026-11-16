@@ -133,6 +133,12 @@ class TaskSpec:
     runtime_rule: str = "best_of_3_lt_1.05"
     #: 生成时的附加元信息（来源 run、形状解析告警等）
     meta: Dict[str, Any] = field(default_factory=dict)
+    #: 任务类型："single" 单算子 / "fused" 融合；默认单算子
+    kind: str = "single"
+    #: 融合覆盖的算子序列
+    ops: List[str] = field(default_factory=list)
+    #: 融合区域标识（回灌时用于独占声明）
+    region: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -154,6 +160,9 @@ class TaskSpec:
             "escalation_reasons": self.escalation_reasons,
             "runtime_rule": self.runtime_rule,
             "meta": self.meta,
+            "kind": self.kind,
+            "ops": self.ops,
+            "region": self.region,
         }
 
     def to_toml(self) -> str:
@@ -172,6 +181,12 @@ class TaskSpec:
             f"reference = {_toml_value(self.reference)}",
             f"judge = {_toml_value(self.judge)}",
         ]
+        # 融合任务才写这三个字段：单算子模式的 toml 保持逐字节不变
+        if self.kind != "single":
+            lines.append(f"kind = {_toml_value(self.kind)}")
+            lines.append(f"ops = {_toml_value(self.ops)}")
+            if self.region is not None:
+                lines.append(f"region = {_toml_value(self.region)}")
         # shapes: 数组的数组，逐行展开便于人工审阅
         shape_lines = ",\n  ".join(_toml_value(dims) for dims in self.shapes)
         lines.append(f"shapes = [\n  {shape_lines},\n]")
