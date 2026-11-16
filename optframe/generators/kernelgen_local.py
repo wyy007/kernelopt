@@ -148,6 +148,9 @@ class KernelgenLocal:
         temperatures: tuple = (0.2, 0.6, 1.0),
         prompt_mode: str = "default",
         max_tokens: int = 3000,
+        max_retries: int = 1,
+        truncation_boost: float = 1.5,
+        max_tokens_cap: int = 8192,
     ):
         self.base_url = base_url.rstrip("/")
         self.model = model
@@ -156,8 +159,14 @@ class KernelgenLocal:
         self.temperatures = temperatures
         self.prompt_mode = prompt_mode
         self.max_tokens = max_tokens
+        #: 截断/无代码时的同轮重试次数（0 表示不重试）
+        self.max_retries = max(0, int(max_retries))
+        #: 截断后把 max_tokens 放大多少倍
+        self.truncation_boost = float(truncation_boost)
+        self.max_tokens_cap = int(max_tokens_cap)
 
-    def _chat(self, prompt: str, temperature: float) -> str:
+    def _chat(self, prompt: str, temperature: float,
+              max_tokens: Optional[int] = None) -> tuple[str, dict, str]:
         payload = {
             "model": self.model,
             "messages": [
@@ -165,7 +174,7 @@ class KernelgenLocal:
                 {"role": "user", "content": prompt},
             ],
             "temperature": temperature,
-            "max_tokens": self.max_tokens,
+            "max_tokens": int(max_tokens or self.max_tokens),
         }
         req = urllib.request.Request(
             f"{self.base_url}/chat/completions",
@@ -181,7 +190,10 @@ class KernelgenLocal:
         with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
             raw = resp.read().decode("utf-8", "replace")
         body = _decode_response(raw)
-        return body["choices"][0]["message"]["content"]
+        usage = body.get("usage") or {}
+        choice = body["choices"][0]
+        finish = choice.get("finish_reason") or ""
+        return choice["message"]["content"], usage, finish
 
     def propose(self, task: Task, context: GenContext, n: int = 1) -> List[Candidate]:
         prompt = build_prompt(task, context, self.prompt_mode)
@@ -189,27 +201,56 @@ class KernelgenLocal:
         for i in range(n):
             temperature = self.temperatures[i % len(self.temperatures)]
             started = time.time()
-            try:
-                text = self._chat(prompt, temperature)
-            except (urllib.error.URLError, TimeoutError, KeyError, json.JSONDecodeError) as exc:
-                out.append(
-                    Candidate(
-                        source="",
-                        language="triton",
-                        generator=f"{self.name}:error",
-                        meta={"error": f"{type(exc).__name__}: {exc}", "temperature": temperature},
-                    )
-                )
-                continue
+            usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            attempts = 0
+            code = ""
+            finish = ""
+            text = ""
+            last_error = ""
 
-            code = extract_code(text, prefer="run")
+            for attempt in range(self.max_retries + 1):
+                attempts += 1
+                limit = self.max_tokens
+
+                # 上一轮被截断：放大预算再来一次（这是最省事的修法）
+                if attempt > 0 and finish == "length":
+                    limit = min(int(self.max_tokens * (self.truncation_boost ** attempt)), self.max_tokens_cap)
+
+                try:
+                    text, usage, finish = self._chat(prompt, temperature, max_tokens=limit)
+                except (urllib.error.URLError, TimeoutError, KeyError, json.JSONDecodeError) as exc:
+                    last_error = f"{type(exc).__name__}: {exc}"
+                    continue
+
+                for k in usage_total:
+                    usage_total[k] += int((usage or {}).get(k) or 0)
+
+                code = extract_code(text, prefer="run")
+                # 截断或没代码块才重试；正常结束且拿到代码就收工
+                retryable = (finish == "length") or (not code)
+                if code and finish != "length":
+                    break
+                if not retryable:
+                    break
+
+            latent = round(time.time() - started, 2)
             if not code:
+                meta = {
+                    "temperature": temperature,
+                    "latency_s": latent,
+                    "attempts": attempts,
+                    "finish_reason": finish,
+                    "truncated": finish == "length",
+                    "usage": usage_total,
+                }
+                if last_error:
+                    meta["error"] = last_error
                 out.append(
                     Candidate(
                         source="",
                         language="triton",
-                        generator=f"{self.name}:no_code",
-                        meta={"temperature": temperature, "latency_s": round(time.time() - started, 2)},
+                        generator=f"{self.name}:no_code" if not last_error else f"{self.name}:error",
+                        meta=meta,
                     )
                 )
                 continue
@@ -222,7 +263,11 @@ class KernelgenLocal:
                     meta={
                         "model": self.model,
                         "temperature": temperature,
-                        "latency_s": round(time.time() - started, 2),
+                        "latency_s": latent,
+                        "attempts": attempts,
+                        "finish_reason": finish,
+                        "truncated_after_retry": finish == "length",
+                        "usage": usage_total,
                     },
                 )
             )
