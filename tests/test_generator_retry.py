@@ -131,3 +131,28 @@ def test_zero_retries_keeps_single_attempt():
     cands = gen.propose(make_task(), GenContext(), n=1)
     assert cands[0].meta["attempts"] == 1
     assert cands[0].generator == "kernelgen_local:no_code"
+
+
+def test_validator_rejection_triggers_retry_with_witness():
+    """lint 拒绝后，同轮带见证重试一次。"""
+    gen = make_gen(max_retries=1)
+    calls = {"n": 0, "prompts": []}
+
+    bad = CODE.replace("mask = offs < n", "mask = offs < n + 1")  # 仅用于制造差异
+
+    def fake_chat(prompt, temperature, max_tokens=None):
+        calls["n"] += 1
+        calls["prompts"].append(prompt)
+        return (bad, usage(), "stop") if calls["n"] == 1 else (CODE, usage(), "stop")
+
+    def validator(code):
+        return "mask 覆盖不完整" if "offs < n + 1" in code else None
+
+    gen._chat = fake_chat          # type: ignore[assignment]
+    gen.validator = validator      # type: ignore[assignment]
+    cands = gen.propose(make_task(), GenContext(), n=1)
+
+    assert cands[0].meta["attempts"] == 2
+    assert cands[0].meta["lint_rejected"] == 1
+    assert "mask 覆盖不完整" in calls["prompts"][1]
+    assert "offs < n + 1" not in cands[0].source

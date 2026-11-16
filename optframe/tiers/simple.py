@@ -92,6 +92,15 @@ def run_simple_tier(
     lint: bool = True,
 ) -> TierOutcome:
     task = load_task(task_or_dir) if isinstance(task_or_dir, (str, Path)) else task_or_dir
+
+    # 把 lint 作为生成器的校验回调：失败时带见证在同轮重试，而不是等到下一轮
+    if getattr(generator, "validator", None) is None and hasattr(generator, "validator"):
+        def _validate(code: str) -> Optional[str]:
+            rep = lint_source(code, shapes=getattr(task, "shapes", None),
+                              dtype=getattr(task, "dtype_name", None), language="triton")
+            return None if rep.ok else format_violations(rep)
+
+        generator.validator = _validate  # type: ignore[attr-defined]
     workdir = Path(workdir) if workdir else (task.dir / "runs" / "simple")
     workdir.mkdir(parents=True, exist_ok=True)
 

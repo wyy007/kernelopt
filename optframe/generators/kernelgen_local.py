@@ -13,7 +13,7 @@ import os
 import time
 import urllib.error
 import urllib.request
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from ..contracts.schema import Candidate
 from ..contracts.task import Task
@@ -151,6 +151,7 @@ class KernelgenLocal:
         max_retries: int = 1,
         truncation_boost: float = 1.5,
         max_tokens_cap: int = 8192,
+        validator: Optional[Callable[[str], Optional[str]]] = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.model = model
@@ -164,6 +165,8 @@ class KernelgenLocal:
         #: 截断后把 max_tokens 放大多少倍
         self.truncation_boost = float(truncation_boost)
         self.max_tokens_cap = int(max_tokens_cap)
+        #: 代码级校验回调：返回 None 表示通过，返回字符串表示拒绝原因（见证式）
+        self.validator = validator
 
     def _chat(self, prompt: str, temperature: float,
               max_tokens: Optional[int] = None) -> tuple[str, dict, str]:
@@ -208,6 +211,8 @@ class KernelgenLocal:
             text = ""
             last_error = ""
 
+            cur_prompt = prompt
+            lint_rejected = 0
             for attempt in range(self.max_retries + 1):
                 attempts += 1
                 limit = self.max_tokens
@@ -217,7 +222,7 @@ class KernelgenLocal:
                     limit = min(int(self.max_tokens * (self.truncation_boost ** attempt)), self.max_tokens_cap)
 
                 try:
-                    text, usage, finish = self._chat(prompt, temperature, max_tokens=limit)
+                    text, usage, finish = self._chat(cur_prompt, temperature, max_tokens=limit)
                 except (urllib.error.URLError, TimeoutError, KeyError, json.JSONDecodeError) as exc:
                     last_error = f"{type(exc).__name__}: {exc}"
                     continue
@@ -226,11 +231,23 @@ class KernelgenLocal:
                     usage_total[k] += int((usage or {}).get(k) or 0)
 
                 code = extract_code(text, prefer="run")
+
+                # 代码级校验（如静态检查）：把见证塞回 prompt 再要一次
+                if code and finish != "length" and self.validator is not None:
+                    reason = self.validator(code)
+                    if reason:
+                        lint_rejected += 1
+                        cur_prompt = (
+                            prompt
+                            + "\n\n上一次输出未通过静态检查：\n"
+                            + reason
+                            + "\n请修正上述问题，重新输出完整的 ```python 代码块。"
+                        )
+                        if attempt < self.max_retries:
+                            continue
+
                 # 截断或没代码块才重试；正常结束且拿到代码就收工
-                retryable = (finish == "length") or (not code)
                 if code and finish != "length":
-                    break
-                if not retryable:
                     break
 
             latent = round(time.time() - started, 2)
@@ -241,6 +258,7 @@ class KernelgenLocal:
                     "attempts": attempts,
                     "finish_reason": finish,
                     "truncated": finish == "length",
+                    "lint_rejected": lint_rejected,
                     "usage": usage_total,
                 }
                 if last_error:
@@ -267,6 +285,7 @@ class KernelgenLocal:
                         "attempts": attempts,
                         "finish_reason": finish,
                         "truncated_after_retry": finish == "length",
+                        "lint_rejected": lint_rejected,
                         "usage": usage_total,
                     },
                 )
