@@ -45,6 +45,7 @@ def main() -> int:
     ap.add_argument("--k", type=int, default=4096)
     ap.add_argument("--half", type=int, default=12288)
     ap.add_argument("--iters", type=int, default=25)
+    ap.add_argument("--fixed-order", action="store_true", help="每对固定先 mm+act 后 fused")
     args = ap.parse_args()
 
     M, K, H = args.m, args.k, args.half
@@ -75,7 +76,9 @@ def main() -> int:
     torch.cuda.synchronize()
     pairs = []
     for i in range(args.iters):
-        if i % 2 == 0:
+        if args.fixed_order:
+            a1, a2 = mm_plus_act, fused
+        elif i % 2 == 0:
             a1, a2 = mm_plus_act, fused
         else:
             a1, a2 = fused, mm_plus_act

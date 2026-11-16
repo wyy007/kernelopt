@@ -58,6 +58,7 @@ def evaluate_candidate(
     repeat: int = 50,
     forbid_torch: bool = True,
     flush_cache: bool = True,
+    prime: bool = True,
 ) -> Result:
     """完整评测一个候选，返回统一口径的 Result。"""
     workdir = Path(workdir)
@@ -146,7 +147,7 @@ def evaluate_candidate(
         if baseline.fn is not None:
             ref_samples, cand_samples = time_pair_samples(
                 baseline.fn, lambda: run(*inputs), warmup=warmup, repeat=repeat,
-                flush_cache=flush_cache,
+                flush_cache=flush_cache, prime=prime,
             )
             ref_ms = float(median(ref_samples))
             ms = float(median(cand_samples))
@@ -162,7 +163,7 @@ def evaluate_candidate(
         else:
             ref_ms = baseline.ms
             ms = time_ms(lambda: run(*inputs), warmup=warmup, repeat=repeat,
-                         flush_cache=flush_cache)
+                         flush_cache=flush_cache, prime=prime)
             ratio_low, ratio_high, pairs = None, None, 0
             ratio_point = None
     except Exception as exc:  # noqa: BLE001

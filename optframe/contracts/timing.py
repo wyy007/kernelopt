@@ -26,16 +26,34 @@ def _flush_cache() -> None:
     _FLUSH_BUFFER.zero_()
 
 
+def prime_allocator(fn: Callable, rounds: int = 3) -> None:
+    """预热缓存分配器：连续调用并**持有**返回值，迫使对应尺寸的块进入 PyTorch 的缓存池。
+
+    目的：让 baseline 与 candidate 在正式计时前都处于"分配走缓存快路径"的同一状态，
+    避免一侧因 cudaMalloc 抖动被系统性拖慢（2026-11-16 实测该偏差可达 20%）。
+    """
+    keep = []
+    for _ in range(max(1, rounds)):
+        keep.append(fn())
+    torch.cuda.synchronize()
+    keep.clear()
+    torch.cuda.synchronize()
+
+
 def time_ms(
     fn: Callable,
     *,
     warmup: int = 10,
     repeat: int = 50,
     flush_cache: bool = True,
+    prime: bool = True,
 ) -> float:
     """返回单次调用的中位耗时（毫秒）。"""
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required for device timing")
+
+    if prime:
+        prime_allocator(fn)
 
     for _ in range(max(warmup, 0)):
         fn()
@@ -63,6 +81,7 @@ def time_pair_samples(
     warmup: int = 10,
     repeat: int = 50,
     flush_cache: bool = True,
+    prime: bool = True,
 ) -> Tuple[List[float], List[float]]:
     """交错 A/B 采样，返回 (ref_samples, cand_samples)。
 
@@ -71,6 +90,11 @@ def time_pair_samples(
     """
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required for device timing")
+
+    # 两侧都预热分配器：否则"基线多分配一次中间结果"会被记成它的固有开销
+    if prime:
+        prime_allocator(fn_ref)
+        prime_allocator(fn_cand)
 
     for _ in range(max(warmup, 0)):
         fn_ref()
