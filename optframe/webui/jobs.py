@@ -55,6 +55,7 @@ class Action:
     params: List[Dict[str, Any]]
     build: Callable[[Dict[str, Any]], List[str]]
     needs_gpu: bool = False
+    danger: bool = False
     timeout_s: int = 3600
 
 
@@ -79,6 +80,37 @@ def _build_fusion_tasks(p: Dict[str, Any]) -> List[str]:
             "--min-share", str(float(p.get("min_share") or 0.0))]
 
 
+def _model_path(value: Any) -> str:
+    """模型目录允许在 /model 下（不受仓库路径限制），但必须在白名单根内。"""
+    p = Path(str(value or ""))
+    if not p.is_absolute():
+        raise ParamError("模型路径必须是绝对路径，例如 /model/Qwen3-8B")
+    roots = [Path("/model").resolve()]
+    rp = p.resolve()
+    if not any(rp == r or r in rp.parents for r in roots):
+        raise ParamError("模型路径必须在 /model 下")
+    if not rp.exists():
+        raise ParamError(f"模型目录不存在：{value}")
+    return str(rp)
+
+
+def _build_capture(p: Dict[str, Any]) -> List[str]:
+    if not p.get("confirm"):
+        raise ParamError("需要显式确认（勾选「我确认独占 GPU」）")
+    model = _model_path(p.get("model") or "/model/Qwen3-8B")
+    argv = [sys.executable, "-m", "optframe.webui.capture",
+            "--model", model,
+            "--concurrency", str(int(p.get("concurrency") or 8)),
+            "--isl", str(int(p.get("isl") or 400)),
+            "--seconds", str(float(p.get("seconds") or 30)),
+            "--num-steps", str(int(p.get("num_steps") or 30)),
+            "--mem-fraction", str(float(p.get("mem_fraction") or 0.55)),
+            "--max-used-gb", str(float(p.get("max_used_gb") or 5.0))]
+    if p.get("run_id"):
+        argv += ["--run-id", str(p["run_id"])]
+    return argv
+
+
 def _build_preflight(p: Dict[str, Any]) -> List[str]:
     return [sys.executable, "-m", "optframe.preflight"]
 
@@ -101,6 +133,21 @@ ACTIONS: Dict[str, Action] = {
              "placeholder": "留空自动生成", "optional": True},
         ],
         build=_build_analysis,
+    ),
+    "capture": Action(
+        name="capture", title="采集 trace", needs_gpu=True, danger=True, timeout_s=1800,
+        desc="起 SGLang → 预热 → 采样 → 校验。会独占 GPU 并在结束后关闭服务；"
+             "若显卡被占用会直接失败（不会杀未知进程）。",
+        params=[
+            {"name": "model", "label": "模型路径", "type": "path",
+             "default": "/model/Qwen3-8B", "placeholder": "/model/Qwen3-8B"},
+            {"name": "concurrency", "label": "并发", "type": "number", "default": 8, "optional": True},
+            {"name": "isl", "label": "输入长度（词）", "type": "number", "default": 400, "optional": True},
+            {"name": "seconds", "label": "打流秒数", "type": "number", "default": 30, "optional": True},
+            {"name": "num_steps", "label": "采样步数", "type": "number", "default": 30, "optional": True},
+            {"name": "confirm", "label": "我确认独占 GPU", "type": "bool", "optional": False},
+        ],
+        build=_build_capture,
     ),
     "fusion_tasks": Action(
         name="fusion_tasks", title="生成融合任务", needs_gpu=False, timeout_s=1200,

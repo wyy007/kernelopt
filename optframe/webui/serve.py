@@ -86,7 +86,7 @@ class Handler(BaseHTTPRequestHandler):
         if rest == ["actions"]:
             return self._json({"actions": [
                 {"name": a.name, "title": a.title, "desc": a.desc,
-                 "params": a.params, "needs_gpu": a.needs_gpu}
+                 "params": a.params, "needs_gpu": a.needs_gpu, "danger": a.danger}
                 for a in jobs.ACTIONS.values()]})
         if rest == ["jobs"]:
             return self._json({"jobs": jobs.recent()})

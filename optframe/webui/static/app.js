@@ -207,12 +207,15 @@ async function loadActions() {
     box.innerHTML = '';
     for (const a of data.actions || []) {
       const card = el('div', 'card');
-      const fields = (a.params || []).map((p) => `
-        <div class="field"><span>${escapeHtml(p.label)}</span>
-          <input class="search" style="max-width:220px" data-p="${escapeHtml(p.name)}"
-                 placeholder="${escapeHtml(p.placeholder || '')}"
-                 value="${escapeHtml(p.default ?? '')}"></div>`).join('');
-      card.innerHTML = `<div class="k">${escapeHtml(a.title)}${a.needs_gpu ? ' · 需 GPU' : ''}</div>
+      const fields = (a.params || []).map((p) => (p.type === 'bool'
+        ? `<div class="field"><span>${escapeHtml(p.label)}</span>
+             <input type="checkbox" data-p="${escapeHtml(p.name)}" data-type="bool"></div>`
+        : `<div class="field"><span>${escapeHtml(p.label)}</span>
+             <input class="search" data-p="${escapeHtml(p.name)}" data-type="${escapeHtml(p.type || 'text')}"
+                    placeholder="${escapeHtml(p.placeholder || '')}"
+                    value="${escapeHtml(p.default ?? '')}"></div>`)).join('');
+      card.innerHTML = `<div class="k">${escapeHtml(a.title)}${a.needs_gpu ? ' · 需 GPU' : ''}${
+        a.danger ? ' · <span style="color:var(--red)">危险</span>' : ''}</div>
         <div class="s" style="margin:6px 0 8px">${escapeHtml(a.desc)}</div>${fields}
         <div style="margin-top:8px"><button class="btn primary" data-act="${escapeHtml(a.name)}">开始</button></div>`;
       card.querySelector('button').onclick = () => submitAction(a.name, card);
@@ -226,7 +229,10 @@ async function loadActions() {
 
 async function submitAction(name, card) {
   const params = {};
-  card.querySelectorAll('input[data-p]').forEach((i) => { if (i.value.trim()) params[i.dataset.p] = i.value.trim(); });
+  card.querySelectorAll('input[data-p]').forEach((i) => {
+    if (i.type === 'checkbox') { params[i.dataset.p] = i.checked; }
+    else if (i.value.trim()) { params[i.dataset.p] = i.value.trim(); }
+  });
   $('job-head').textContent = '提交中…';
   try {
     const r = await fetch(`/api/actions/${encodeURIComponent(name)}`, {
