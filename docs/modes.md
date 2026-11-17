@@ -143,8 +143,8 @@
 | 1（已完成） | `kind`/`ops`/`region` 字段 + 向后兼容测试 | 无 |
 | 2 | `inventory/fusion_tasks.py`：从 trace 相邻 op 生成 region 任务 | 无 |
 | 3 | `tiers/fusion.py`：复用 simple 的 best-of-N / 重试 / CI | 无 |
-| 4 | `delivery` 第二张注册表 + 调度顺序 + 互斥开关 | 需回归 §6.1 |
-| 5 | e2e 验证：融合 region 开关 A/B，CI 下界 > 1.015 才算成立 | 需回归 §6.1 |
+| 4（已完成） | `delivery` 第二张注册表 + `dispatch` 调度顺序 + 形状门槛 | 无（单表逻辑未改） |
+| 5 | e2e 验证：需要先把融合表接入模型 hook（SiluAndMul/linear），再做 region 开关 A/B | 需回归 §6.1 |
 
 ### 5.8 真正的元凶：评测环境与服务的 torch 版本不一致
 
