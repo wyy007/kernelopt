@@ -22,7 +22,26 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 REPO = Path(os.environ.get("OPTFRAME_REPO", "/model/wyy/optframe")).resolve()
+
+
+def _load_env_file(path: str = "/root/.optframe_env") -> None:
+    """把远端凭据文件里的 export KEY=VALUE 读进环境（不覆盖已有值）。"""
+    f = Path(path)
+    if not f.exists():
+        return
+    try:
+        for line in f.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("export ") and "=" in line:
+                key, _, val = line[len("export "):].partition("=")
+                os.environ.setdefault(key.strip(), val.strip().strip('"').strip("'"))
+    except OSError:
+        pass
+
+
+_load_env_file()
 JOBS_DIR = REPO / "runs" / "_jobs"
+CONTAINER = os.environ.get("OPTFRAME_CONTAINER", "sglang-debug")
 JOBS_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -62,6 +81,8 @@ class Action:
     build: Callable[[Dict[str, Any]], List[str]]
     needs_gpu: bool = False
     danger: bool = False
+    #: 视为"成功"的退出码（有的动作把"未 KEEP"编码成 1）
+    ok_codes: tuple = (0,)
     timeout_s: int = 3600
 
 
@@ -117,6 +138,36 @@ def _build_capture(p: Dict[str, Any]) -> List[str]:
     return argv
 
 
+def _build_fusion_eval(p: Dict[str, Any]) -> List[str]:
+    task = _path_in_repo(p["task"])
+    if not (Path(task) / "task.toml").exists():
+        raise ParamError("task 目录里没有 task.toml")
+    gen = str(p.get("generator") or "fixture")
+    if gen not in ("fixture", "llm"):
+        raise ParamError("generator 只能是 fixture 或 llm")
+    workdir = str(p.get("workdir") or f"runs/fusion_eval_{int(time.time())}")
+    if not workdir.startswith("runs/"):
+        raise ParamError("workdir 必须以 runs/ 开头")
+    # 跑在容器里：宿主 venv 的 torch 版本与服务不同，基线会偏（实测 0.958 vs 1.10）
+    argv = ["docker", "exec", "-w", str(REPO), "-e", f"PYTHONPATH={REPO}",
+            CONTAINER, "python3", "-m", "optframe.tiers.fusion",
+            "--task", task, "--generator", gen,
+            "--n", str(int(p.get("n") or 1)),
+            "--rounds", str(int(p.get("rounds") or 1)),
+            "--repeat", str(int(p.get("repeat") or 20)),
+            "--workdir", workdir]
+    if gen == "fixture":
+        fx = _path_in_repo(p.get("fixture_dir") or "fixtures/swiglu")
+        argv += ["--fixture-dir", fx]
+    else:
+        if not os.environ.get("GPUSTACK_API_KEY"):
+            raise ParamError("缺少 GPUSTACK_API_KEY（/root/.optframe_env 未加载）")
+        argv += ["--model", str(p.get("model") or "ds-v4")]
+    if p.get("baseline_module"):
+        argv += ["--baseline-module", str(p["baseline_module"])]
+    return argv
+
+
 def _build_preflight(p: Dict[str, Any]) -> List[str]:
     return [_python(), "-m", "optframe.preflight"]
 
@@ -139,6 +190,25 @@ ACTIONS: Dict[str, Action] = {
              "placeholder": "留空自动生成", "optional": True},
         ],
         build=_build_analysis,
+    ),
+    "fusion_eval": Action(
+        name="fusion_eval", title="跑融合评测", needs_gpu=True, ok_codes=(0, 1), timeout_s=3600,
+        desc="对一个 kind=fused 任务跑 best-of-N 与冷缓存 A/B，产出 KEEP/REVERT 与账本。"
+             "fixture 模式用内置核验证链路，llm 模式调驱动模型生成候选。",
+        params=[
+            {"name": "task", "label": "融合任务目录", "type": "path",
+             "placeholder": "runs/fusion_tasks_8b/fused__swiglu__8192x4096x24576"},
+            {"name": "generator", "label": "生成器（fixture/llm）", "type": "text",
+             "default": "fixture", "optional": True},
+            {"name": "model", "label": "驱动模型（llm 时用）", "type": "text",
+             "default": "ds-v4", "optional": True},
+            {"name": "n", "label": "每轮候选数", "type": "number", "default": 1, "optional": True},
+            {"name": "rounds", "label": "轮数", "type": "number", "default": 1, "optional": True},
+            {"name": "repeat", "label": "A/B 配对数", "type": "number", "default": 20, "optional": True},
+            {"name": "baseline_module", "label": "基线实现（可选）", "type": "text",
+             "placeholder": "tools/swiglu_service_baseline.py:run", "optional": True},
+        ],
+        build=_build_fusion_eval,
     ),
     "capture": Action(
         name="capture", title="采集 trace", needs_gpu=True, danger=True, timeout_s=1800,
@@ -249,7 +319,8 @@ def _run_job(job: Job) -> None:
                 job.error = f"超时（{action.timeout_s}s）"
             _proc.pop(job.id, None)
         job.returncode = rc
-        job.status = "done" if rc == 0 else ("canceled" if job.status == "canceled" else "failed")
+        ok = rc in action.ok_codes
+        job.status = "done" if ok else ("canceled" if job.status == "canceled" else "failed")
     except Exception as exc:  # noqa: BLE001
         job.status = "failed"
         job.error = f"{type(exc).__name__}: {exc}"
