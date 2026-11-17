@@ -194,6 +194,15 @@ function renderReport() {
   $('rp-ledger').innerHTML = (last || []).map((x) =>
     `<div>${escapeHtml(x.verdict)} · ratio ${fmt(x.ratio, 4)} · ${escapeHtml(x.generator || '')}</div>`).join('') || '—';
 
+  const cap = r.capture;
+  $('rp-capture').innerHTML = cap ? `
+    <div class="card"><div class="k">采集</div>
+      <div class="v">${escapeHtml(cap.verdict || '—')}</div>
+      <div class="s">${escapeHtml((cap.trace_stats || {}).size_mb || '')} MB ·
+        ${(cap.trace_stats || {}).kernels || 0} kernel ·
+        忙碌 ${(cap.trace_stats || {}).busy_pct || 0}% ·
+        ${escapeHtml((cap.load || {}).ok || 0)}/${escapeHtml((cap.load || {}).requests || 0)} 请求</div></div>` : '';
+
   const e = r.e2e;
   $('rp-e2e').textContent = e
     ? `延迟比 ${fmt(e.lat_ratio_median, 4)} · CI [${fmt((e.lat_ratio_ci || [])[0], 4)}, ${fmt((e.lat_ratio_ci || [])[1], 4)}]`
@@ -258,6 +267,8 @@ function watchJob(id) {
       $('job-cancel').onclick = async () => { await fetch(`/api/jobs/${id}/cancel`, { method: 'POST' }); };
       if (j.status === 'done' || j.status === 'failed' || j.status === 'canceled') {
         clearInterval(jobTimer); jobTimer = null;
+        // 任务结束自动刷新运行列表（采集类会新增 run）
+        boot();
       }
     } catch (e) { /* 忽略轮询错误 */ }
   };

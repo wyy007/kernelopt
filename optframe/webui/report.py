@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 
 _ARTIFACTS = [
     ("analysis", "bottlenecks.json"),
+    ("capture", "capture.json"),
     ("tasks", "index.json"),
     ("eval", "ledger.jsonl"),
     ("e2e", "e2e_ab.json"),
@@ -124,6 +125,11 @@ def load_run(root: Path, run_id: str) -> Optional[Dict[str, Any]]:
     if e2e is not None:
         payload["files"]["e2e"] = str(e2e)
         payload["e2e"] = _read_json(e2e)
+
+    cap = _find_artifact(d, "capture.json")
+    if cap is not None:
+        payload["files"]["capture"] = str(cap)
+        payload["capture"] = _read_json(cap)
 
     tasks = _find_artifact(d, "index.json")
     if tasks is not None:
