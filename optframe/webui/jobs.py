@@ -171,6 +171,21 @@ def _build_fusion_eval(p: Dict[str, Any]) -> List[str]:
     return argv
 
 
+def _build_e2e(p: Dict[str, Any]) -> List[str]:
+    if not p.get("confirm"):
+        raise ParamError("需要显式确认（勾选「我确认独占 GPU」）")
+    model = _model_path(p.get("model") or "/model/Qwen3-8B")
+    argv = [_python(), "-m", "optframe.webui.e2e", "--model", model,
+            "--blocks", str(int(p.get("blocks") or 6)),
+            "--seconds", str(float(p.get("seconds") or 20)),
+            "--concurrency", str(int(p.get("concurrency") or 8)),
+            "--prompt-chars", str(int(p.get("prompt_chars") or 12000)),
+            "--max-tokens", str(int(p.get("max_tokens") or 8))]
+    if p.get("run_id"):
+        argv += ["--run-id", str(p["run_id"])]
+    return argv
+
+
 def _build_preflight(p: Dict[str, Any]) -> List[str]:
     return [_python(), "-m", "optframe.preflight"]
 
@@ -213,13 +228,29 @@ ACTIONS: Dict[str, Action] = {
         ],
         build=_build_fusion_eval,
     ),
+    "e2e_ab": Action(
+        name="e2e_ab", title="端到端 A/B", needs_gpu=True, danger=True,
+        ok_codes=(0, 1), timeout_s=2400,
+        desc="起带回灌的 8B → 交替块 A/B（关/开）→ 关服务。用于判定回灌有没有真实收益。"
+             "会独占 GPU；INCONCLUSIVE 也会以退出码 1 结束（不是失败）。",
+        params=[
+            {"name": "model", "label": "模型", "type": "select", "source": "models",
+             "default": "/model/Qwen3-8B"},
+            {"name": "blocks", "label": "块数（偶数）", "type": "number", "default": 6, "optional": True},
+            {"name": "seconds", "label": "每块秒数", "type": "number", "default": 20, "optional": True},
+            {"name": "concurrency", "label": "并发", "type": "number", "default": 8, "optional": True},
+            {"name": "prompt_chars", "label": "提示长度（字符）", "type": "number", "default": 12000, "optional": True},
+            {"name": "confirm", "label": "我确认独占 GPU", "type": "bool", "optional": False},
+        ],
+        build=_build_e2e,
+    ),
     "capture": Action(
         name="capture", title="采集 trace", needs_gpu=True, danger=True, timeout_s=1800,
         desc="起 SGLang → 预热 → 采样 → 校验。会独占 GPU 并在结束后关闭服务；"
              "若显卡被占用会直接失败（不会杀未知进程）。",
         params=[
-            {"name": "model", "label": "模型路径", "type": "path",
-             "default": "/model/Qwen3-8B", "placeholder": "/model/Qwen3-8B"},
+            {"name": "model", "label": "模型", "type": "select", "source": "models",
+             "default": "/model/Qwen3-8B"},
             {"name": "concurrency", "label": "并发", "type": "number", "default": 8, "optional": True},
             {"name": "isl", "label": "输入长度（词）", "type": "number", "default": 400, "optional": True},
             {"name": "seconds", "label": "打流秒数", "type": "number", "default": 30, "optional": True},

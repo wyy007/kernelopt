@@ -83,6 +83,14 @@ class Handler(BaseHTTPRequestHandler):
             cur = (qs.get("cur") or [""])[0]
             prev = (qs.get("prev") or [""])[0]
             return self._json(report.diff_runs(ROOT, cur, prev))
+        if rest == ["models"]:
+            base = Path("/model")
+            items = []
+            if base.exists():
+                for d in sorted(base.iterdir()):
+                    if d.is_dir() and (d / "config.json").exists():
+                        items.append({"name": d.name, "path": str(d)})
+            return self._json({"models": items})
         if rest == ["actions"]:
             return self._json({"actions": [
                 {"name": a.name, "title": a.title, "desc": a.desc,

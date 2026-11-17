@@ -4,6 +4,7 @@ const state = {
   run: null,
   diff: {},
   tab: 'list',
+  autoOpenNewest: false,
   filter: 'all',
   q: '',
   prevId: null,
@@ -26,6 +27,11 @@ async function boot() {
     state.runs = data.runs || [];
     $('chip-root').textContent = data.root || 'runs';
     renderRuns();
+    if (state.autoOpenNewest && state.runs[0]) {
+      state.autoOpenNewest = false;
+      await openRun(state.runs[0].id);
+      return;
+    }
     const pick = state.runs.find((r) => (r.kinds || []).includes('analysis')) || state.runs[0];
     if (pick) await openRun(pick.id);
   } catch (e) {
@@ -232,6 +238,11 @@ function renderReport() {
 
 async function loadActions() {
   const box = $('actions');
+  let models = [];
+  try {
+    const md = await getJSON('/api/models');
+    models = md.models || [];
+  } catch (e) { /* 忽略 */ }
   try {
     const data = await getJSON('/api/actions');
     box.innerHTML = '';
@@ -240,6 +251,12 @@ async function loadActions() {
       const fields = (a.params || []).map((p) => (p.type === 'bool'
         ? `<div class="field"><span>${escapeHtml(p.label)}</span>
              <input type="checkbox" data-p="${escapeHtml(p.name)}" data-type="bool"></div>`
+        : p.type === 'select'
+        ? `<div class="field"><span>${escapeHtml(p.label)}</span>
+             <select class="search" data-p="${escapeHtml(p.name)}" data-type="select">
+               ${((p.source === 'models' && models.length) ? models : [{ name: p.default || '（未发现模型）', path: p.default || '' }]).map((m) =>
+                 `<option value="${escapeHtml(m.path)}"${m.path === p.default ? ' selected' : ''}>${escapeHtml(m.name)}</option>`).join('')}
+             </select></div>`
         : `<div class="field"><span>${escapeHtml(p.label)}</span>
              <input class="search" data-p="${escapeHtml(p.name)}" data-type="${escapeHtml(p.type || 'text')}"
                     placeholder="${escapeHtml(p.placeholder || '')}"
@@ -261,6 +278,7 @@ async function submitAction(name, card) {
   const params = {};
   card.querySelectorAll('input[data-p]').forEach((i) => {
     if (i.type === 'checkbox') { params[i.dataset.p] = i.checked; }
+    else if (i.tagName === 'SELECT') { params[i.dataset.p] = i.value; }
     else if (i.value.trim()) { params[i.dataset.p] = i.value.trim(); }
   });
   $('job-head').textContent = '提交中…';
@@ -288,7 +306,8 @@ function watchJob(id) {
       $('job-cancel').onclick = async () => { await fetch(`/api/jobs/${id}/cancel`, { method: 'POST' }); };
       if (j.status === 'done' || j.status === 'failed' || j.status === 'canceled') {
         clearInterval(jobTimer); jobTimer = null;
-        // 任务结束自动刷新运行列表（采集类会新增 run）
+        // 任务结束自动刷新，并直接打开最新的 run
+        state.autoOpenNewest = true;
         boot();
       }
     } catch (e) { /* 忽略轮询错误 */ }
