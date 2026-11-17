@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>optframe 控制台</title>
+<link rel="stylesheet" href="/style.css"></head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand"><b>OPTFRAME</b><span>/ 控制台</span></div><div class="sep"></div>
+    <div class="chip" id="chip-root">runs</div>
+    <div class="chip" id="chip-run">-</div>
+    <div class="spacer"></div>
+    <button class="btn" id="btn-reload">刷新</button>
+  </header>
+
+  <aside class="rail">
+    <h6>运行历史</h6>
+    <div id="runs"></div>
+  </aside>
+
+  <main class="main">
+    <div class="h1"><h1 id="title">选择左侧运行</h1><span class="path" id="subtitle"></span></div>
+
+    <div class="toolbar" id="toolbar">
+      <div class="tab on" data-tab="list">瓶颈清单</div>
+      <div class="tab" data-tab="report">报告</div>
+      <div class="sep"></div>
+      <div class="fchip on" data-filter="all">全部 <b id="c-all">0</b></div>
+      <div class="fchip" data-filter="elig">进优化 <b id="c-elig">0</b></div>
+      <div class="fchip" data-filter="reg">回退 <b id="c-reg">0</b></div>
+      <div class="fchip" data-filter="excl">已排除 <b id="c-excl">0</b></div>
+      <input class="search" id="q" placeholder="搜索算子 / 形状，例如 24576 或 copy_">
+    </div>
+
+    <div class="wrap" id="view-list">
+      <div class="tablewrap">
+        <table>
+          <colgroup><col style="width:30px"><col><col style="width:84px"><col style="width:88px">
+            <col style="width:58px"><col style="width:92px"><col style="width:100px"><col style="width:72px"></colgroup>
+          <thead><tr><th>#</th><th>算子 / 形状</th><th>类别</th><th>SOL</th>
+            <th class="num">占比</th><th>bound</th><th>判定</th><th class="num" id="th-delta">Δ 上次</th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <div class="tfoot"><span id="foot-left">-</span><span id="foot-right"></span></div>
+    </div>
+
+    <div class="wrap hidden" id="view-report">
+      <div class="metrics" id="report-metrics"></div>
+      <div class="card"><div class="k">结论</div><div class="v" id="rp-verdict">-</div>
+        <div class="s" id="rp-note"></div></div>
+      <div class="card"><div class="k">账本（最近 10 条）</div><div class="s" id="rp-ledger">-</div></div>
+      <div class="card"><div class="k">端到端 A/B</div><div class="s" id="rp-e2e">-</div></div>
+    </div>
+  </main>
+
+  <aside class="side">
+    <h6>运行信息</h6>
+    <div class="kv"><span>类型</span><b id="s-kinds">-</b></div>
+    <div class="kv"><span>算子数</span><b id="s-findings">-</b></div>
+    <div class="kv"><span>可优化</span><b id="s-elig">-</b></div>
+    <div class="kv"><span>GPU 忙碌</span><b id="s-busy">-</b></div>
+    <div class="kv"><span>对比基线</span><b id="s-prev">-</b></div>
+    <h6 style="margin-top:16px">说明</h6>
+    <div class="note">只读视图：所有数字直接来自 runs/ 下的产物文件，不做任何计算或改写。</div>
+  </aside>
+</div>
+<script src="/app.js"></script>
+</body></html>
