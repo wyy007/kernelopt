@@ -22,6 +22,7 @@
     <div class="toolbar" id="toolbar">
       <div class="tab on" data-tab="list">瓶颈清单</div>
       <div class="tab" data-tab="report">报告</div>
+      <div class="tab" data-tab="run">运行</div>
       <div class="sep"></div>
       <div class="fchip on" data-filter="all">全部 <b id="c-all">0</b></div>
       <div class="fchip" data-filter="elig">进优化 <b id="c-elig">0</b></div>
@@ -41,6 +42,18 @@
         </table>
       </div>
       <div class="tfoot"><span id="foot-left">-</span><span id="foot-right"></span></div>
+    </div>
+
+    <div class="wrap hidden" id="view-run">
+      <div id="actions" style="display:grid;grid-template-columns:1fr 1fr;gap:12px"></div>
+      <div class="card" style="margin-top:12px">
+        <div class="k">任务状态</div>
+        <div class="s" id="job-head">尚未提交任务</div>
+        <pre id="job-log" style="margin-top:8px;max-height:220px;overflow:auto;font-family:var(--mono);
+          font-size:10.5px;color:var(--dim);background:#0a0c0b;border:1px solid var(--line);
+          padding:9px 11px;white-space:pre-wrap"></pre>
+        <div style="margin-top:8px"><button class="btn" id="job-cancel" disabled>中止</button></div>
+      </div>
     </div>
 
     <div class="wrap hidden" id="view-report">

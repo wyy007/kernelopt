@@ -200,6 +200,65 @@ function renderReport() {
     : '无 e2e 结果';
 }
 
+async function loadActions() {
+  const box = $('actions');
+  try {
+    const data = await getJSON('/api/actions');
+    box.innerHTML = '';
+    for (const a of data.actions || []) {
+      const card = el('div', 'card');
+      const fields = (a.params || []).map((p) => `
+        <div class="field"><span>${escapeHtml(p.label)}</span>
+          <input class="search" style="max-width:220px" data-p="${escapeHtml(p.name)}"
+                 placeholder="${escapeHtml(p.placeholder || '')}"
+                 value="${escapeHtml(p.default ?? '')}"></div>`).join('');
+      card.innerHTML = `<div class="k">${escapeHtml(a.title)}${a.needs_gpu ? ' · 需 GPU' : ''}</div>
+        <div class="s" style="margin:6px 0 8px">${escapeHtml(a.desc)}</div>${fields}
+        <div style="margin-top:8px"><button class="btn primary" data-act="${escapeHtml(a.name)}">开始</button></div>`;
+      card.querySelector('button').onclick = () => submitAction(a.name, card);
+      box.appendChild(card);
+    }
+    if (!(data.actions || []).length) box.innerHTML = '<div class="empty">没有可用动作</div>';
+  } catch (e) {
+    box.innerHTML = `<div class="empty">无法加载动作（需要后端 serve.py）：${escapeHtml(String(e))}</div>`;
+  }
+}
+
+async function submitAction(name, card) {
+  const params = {};
+  card.querySelectorAll('input[data-p]').forEach((i) => { if (i.value.trim()) params[i.dataset.p] = i.value.trim(); });
+  $('job-head').textContent = '提交中…';
+  try {
+    const r = await fetch(`/api/actions/${encodeURIComponent(name)}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(params),
+    });
+    const job = await r.json();
+    if (!r.ok) throw new Error(job.error || r.status);
+    watchJob(job.id);
+  } catch (e) {
+    $('job-head').textContent = '提交失败：' + String(e);
+  }
+}
+
+let jobTimer = null;
+function watchJob(id) {
+  if (jobTimer) clearInterval(jobTimer);
+  const tick = async () => {
+    try {
+      const j = await getJSON(`/api/jobs/${id}`);
+      $('job-head').textContent = `${j.status} · rc=${j.returncode ?? '—'} · ${j.action} · ${id}`;
+      $('job-log').textContent = j.log_tail || '（暂无输出）';
+      $('job-cancel').disabled = !(j.status === 'running' || j.status === 'queued');
+      $('job-cancel').onclick = async () => { await fetch(`/api/jobs/${id}/cancel`, { method: 'POST' }); };
+      if (j.status === 'done' || j.status === 'failed' || j.status === 'canceled') {
+        clearInterval(jobTimer); jobTimer = null;
+      }
+    } catch (e) { /* 忽略轮询错误 */ }
+  };
+  tick();
+  jobTimer = setInterval(tick, 2000);
+}
+
 function bind() {
   document.querySelectorAll('.tab').forEach((t) => {
     t.onclick = () => {
@@ -207,6 +266,8 @@ function bind() {
       document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('on', x === t));
       $('view-list').classList.toggle('hidden', state.tab !== 'list');
       $('view-report').classList.toggle('hidden', state.tab !== 'report');
+      $('view-run').classList.toggle('hidden', state.tab !== 'run');
+      if (state.tab === 'run') loadActions();
     };
   });
   document.querySelectorAll('.fchip').forEach((c) => {
