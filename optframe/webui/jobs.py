@@ -30,6 +30,12 @@ class ParamError(ValueError):
     pass
 
 
+def _python() -> str:
+    """优先用仓库自带 venv（TraceLens / triton 都装在那里），否则退回当前解释器。"""
+    venv = REPO / ".venv" / "bin" / "python"
+    return str(venv) if venv.exists() else sys.executable
+
+
 def _path_in_repo(value: str, *, must_exist: bool = True) -> str:
     p = Path(value)
     p = p.resolve() if p.is_absolute() else (REPO / value).resolve()
@@ -63,7 +69,7 @@ def _build_analysis(p: Dict[str, Any]) -> List[str]:
     trace = _path_in_repo(p["trace"])
     arch = _path_in_repo(p.get("arch") or "arch/RTX_PRO_5000.json")
     run_id = _run_id(p.get("run_id"))
-    return [sys.executable, "-m", "optframe.analysis.cli",
+    return [_python(), "-m", "optframe.analysis.cli",
             "--trace", trace, "--arch", arch, "--workdir", f"runs/{run_id}",
             "--framework", "sglang", "--model", str(p.get("model") or "qwen3-8b")]
 
@@ -73,7 +79,7 @@ def _build_fusion_tasks(p: Dict[str, Any]) -> List[str]:
     outdir = str(p.get("outdir") or f"runs/fusion_tasks_{int(time.time())}").strip()
     if not outdir.startswith("runs/"):
         raise ParamError("outdir 必须以 runs/ 开头")
-    return [sys.executable, "-m", "optframe.inventory.fusion_tasks",
+    return [_python(), "-m", "optframe.inventory.fusion_tasks",
             "--report", report, "--outdir", outdir,
             "--arch", str(p.get("arch") or "sm_120"),
             "--dtype", str(p.get("dtype") or "bf16"),
@@ -98,7 +104,7 @@ def _build_capture(p: Dict[str, Any]) -> List[str]:
     if not p.get("confirm"):
         raise ParamError("需要显式确认（勾选「我确认独占 GPU」）")
     model = _model_path(p.get("model") or "/model/Qwen3-8B")
-    argv = [sys.executable, "-m", "optframe.webui.capture",
+    argv = [_python(), "-m", "optframe.webui.capture",
             "--model", model,
             "--concurrency", str(int(p.get("concurrency") or 8)),
             "--isl", str(int(p.get("isl") or 400)),
@@ -112,7 +118,7 @@ def _build_capture(p: Dict[str, Any]) -> List[str]:
 
 
 def _build_preflight(p: Dict[str, Any]) -> List[str]:
-    return [sys.executable, "-m", "optframe.preflight"]
+    return [_python(), "-m", "optframe.preflight"]
 
 
 ACTIONS: Dict[str, Action] = {

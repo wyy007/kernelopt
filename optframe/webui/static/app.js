@@ -201,7 +201,28 @@ function renderReport() {
       <div class="s">${escapeHtml((cap.trace_stats || {}).size_mb || '')} MB ·
         ${(cap.trace_stats || {}).kernels || 0} kernel ·
         忙碌 ${(cap.trace_stats || {}).busy_pct || 0}% ·
-        ${escapeHtml((cap.load || {}).ok || 0)}/${escapeHtml((cap.load || {}).requests || 0)} 请求</div></div>` : '';
+        ${escapeHtml((cap.load || {}).ok || 0)}/${escapeHtml((cap.load || {}).requests || 0)} 请求</div>
+      ${cap.trace ? `<div style="margin-top:8px"><button class="btn primary" id="btn-analyze">分析这条 trace</button></div>` : ''}</div>` : '';
+
+  const ab = $('btn-analyze');
+  if (ab && cap && cap.trace) {
+    ab.onclick = async () => {
+      ab.disabled = true; ab.textContent = '提交中…';
+      try {
+        const r = await fetch('/api/actions/analysis', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ trace: cap.trace }),
+        });
+        const job = await r.json();
+        if (!r.ok) throw new Error(job.error || r.status);
+        $('job-head').textContent = `已提交分析 · ${job.id}`;
+        watchJob(job.id);
+      } catch (e) {
+        ab.disabled = false; ab.textContent = '分析这条 trace';
+        $('job-head').textContent = '提交失败：' + String(e);
+      }
+    };
+  }
 
   const e = r.e2e;
   $('rp-e2e').textContent = e
