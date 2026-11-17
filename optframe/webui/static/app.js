@@ -267,6 +267,9 @@ function bind() {
       $('view-list').classList.toggle('hidden', state.tab !== 'list');
       $('view-report').classList.toggle('hidden', state.tab !== 'report');
       $('view-run').classList.toggle('hidden', state.tab !== 'run');
+      document.querySelectorAll('.fchip, #q').forEach((x) => {
+        x.style.display = state.tab === 'list' ? '' : 'none';
+      });
       if (state.tab === 'run') loadActions();
     };
   });
@@ -282,4 +285,10 @@ function bind() {
 }
 
 bind();
+// 支持 ?tab=run 直达（便于分享/截图）
+const m = new URLSearchParams(location.search).get('tab');
+if (m) {
+  const t = document.querySelector(`.tab[data-tab="${m}"]`);
+  if (t) t.click();
+}
 boot();
