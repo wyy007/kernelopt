@@ -102,3 +102,13 @@ if os.environ.get("OPTFRAME_BACKFILL", "0") == "1":
         torch.matmul = matmul
         torch.addmm = addmm
         torch.nn.functional.linear = linear
+
+# ---- SiluAndMul 探针（只观测，不替换实现）----
+if os.environ.get("OPTFRAME_PROBE", "0") == "1":
+    try:
+        from optframe_delivery import probe_swiglu
+
+        probe_swiglu.install()
+    except Exception:  # noqa: BLE001 - 探针失败必须静默放行
+        pass
+
