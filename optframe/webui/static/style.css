@@ -87,3 +87,6 @@ tr:hover td{background:#141817}
 /* 运行页表单 */
 #actions .field input.search{flex:1;max-width:none;min-width:180px;margin-left:12px}
 #actions .field{display:flex;align-items:center;justify-content:space-between;gap:8px}
+
+#actions .field span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46%;flex:0 0 auto}
+#actions .field{gap:10px}
