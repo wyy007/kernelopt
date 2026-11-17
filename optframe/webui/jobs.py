@@ -27,7 +27,10 @@ REPO = Path(os.environ.get("OPTFRAME_REPO", "/model/wyy/optframe")).resolve()
 def _load_env_file(path: str = "/root/.optframe_env") -> None:
     """把远端凭据文件里的 export KEY=VALUE 读进环境（不覆盖已有值）。"""
     f = Path(path)
-    if not f.exists():
+    try:
+        if not f.exists():
+            return
+    except OSError:
         return
     try:
         for line in f.read_text(encoding="utf-8").splitlines():
