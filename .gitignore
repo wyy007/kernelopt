@@ -31,3 +31,6 @@ gpustack.env
 *.safetensors
 *.bin
 *.pt
+
+# WebUI 生成产物
+webui/out/
