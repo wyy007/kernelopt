@@ -112,3 +112,12 @@ if os.environ.get("OPTFRAME_PROBE", "0") == "1":
     except Exception:  # noqa: BLE001 - 探针失败必须静默放行
         pass
 
+# ---- 8B SwiGLU 融合回灌（F.linear + SiluAndMul 联动）----
+if os.environ.get("OPTFRAME_BACKFILL", "0") == "1":
+    try:
+        from optframe_delivery import inject_swiglu
+
+        inject_swiglu.install()
+    except Exception:  # noqa: BLE001 - 回灌失败必须静默放行
+        pass
+
