@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any, Optional, Tuple
 
 import torch
@@ -30,6 +31,9 @@ _orig_linear = None
 _orig_forward = None
 _wt_cache: dict = {}
 _counts = {"fused": 0, "passthrough": 0, "skipped": 0}
+#: 诊断：最近若干次 linear 的 (M, K, 2H) 与决策原因（仅内存，不落盘）
+_diag: list = []
+_DIAG_MAX = 200
 
 
 def mark(t: torch.Tensor) -> torch.Tensor:
@@ -64,6 +68,29 @@ def fusion_shape(inp: torch.Tensor, weight: torch.Tensor,
     if wk != k or two_h % 2 != 0:
         return None
     return m, k, two_h
+
+
+def diag() -> dict:
+    """返回诊断计数：按 (M, K, N, 原因) 聚合。"""
+    agg: dict = {}
+    for item in _diag:
+        agg[item] = agg.get(item, 0) + 1
+    return {str(k): v for k, v in sorted(agg.items(), key=lambda kv: -kv[1])[:50]}
+
+
+_DIAG_LOG = os.environ.get("OPTFRAME_DIAG_LOG", "")
+
+
+def _note(m, k, two_h, reason: str) -> None:
+    if len(_diag) >= _DIAG_MAX:
+        _diag.pop(0)
+    _diag.append((int(m), int(k), int(two_h), reason))
+    if _DIAG_LOG:
+        try:
+            with open(_DIAG_LOG, "a", encoding="utf-8") as fh:
+                fh.write(f"{m},{k},{two_h},{reason}\n")
+        except OSError:
+            pass
 
 
 def _weight_t(weight: torch.Tensor) -> torch.Tensor:
@@ -105,13 +132,23 @@ def install() -> bool:
             if shape is not None:
                 m, k, two_h = shape
                 fn = registry.match_fused(m, k, two_h, pattern="swiglu")
+                if fn is None:
+                    _note(m, k, two_h, "no_match(min_m/pattern)")
                 if fn is not None:
                     wt = _weight_t(weight)
                     out = fn(inp, wt)
                     mark(out)
                     registry.note_hit(f"fused:swiglu:{m}x{k}x{two_h}")
                     _counts["fused"] += 1
+                    _note(m, k, two_h, "fused")
                     return out
+            else:
+                try:
+                    mm = int(inp.shape[0]); kk = int(inp.shape[1]); nn = int(weight.shape[0])
+                    why = "bias" if bias is not None else "shape/dtype/layout"
+                    _note(mm, kk, nn, why)
+                except Exception:  # noqa: BLE001
+                    pass
             _counts["passthrough"] += 1
         except Exception:  # noqa: BLE001 - 回灌失败必须落回原实现
             _counts["skipped"] += 1

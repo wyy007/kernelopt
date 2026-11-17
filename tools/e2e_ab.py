@@ -140,17 +140,40 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--prompt-chars", type=int, default=3000)
     ap.add_argument("--max-tokens", type=int, default=32)
     ap.add_argument("--settle", type=float, default=2.0, help="切开关后的等待秒数")
+    ap.add_argument("--flush", action="store_true", help="每块开始前调用 /flush_cache")
+    ap.add_argument("--warmup-block", action="store_true", help="先跑一个丢弃的热身块")
     ap.add_argument("--out", default=None)
     args = ap.parse_args(argv)
 
     flag = Path(args.flag)
     hits = Path(args.hits)
 
+    def flush_cache() -> None:
+        base = args.url.rsplit("/v1", 1)[0]
+        try:
+            req = urllib.request.Request(base + "/flush_cache", data=b"{}", method="POST",
+                                         headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                r.read()
+        except Exception:  # noqa: BLE001
+            pass
+
+    if args.warmup_block:
+        set_flag(flag, 0)
+        time.sleep(args.settle)
+        block(args.url, args.model, seconds=min(10.0, args.seconds),
+              concurrency=args.concurrency, chars=args.prompt_chars,
+              max_tokens=args.max_tokens)
+        print("warmup block done (discarded)", flush=True)
+
     rows = []
     for i in range(args.blocks):
         mode = "off" if i % 2 == 0 else "on"
         set_flag(flag, 0 if mode == "off" else 1)
         time.sleep(args.settle)
+        if args.flush:
+            flush_cache()
+            time.sleep(0.5)
         before = count_hits(hits)
         r = block(args.url, args.model, seconds=args.seconds,
                   concurrency=args.concurrency, chars=args.prompt_chars,
