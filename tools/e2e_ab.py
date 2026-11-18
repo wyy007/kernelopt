@@ -8,17 +8,26 @@
 3. **开关落地确认**：flag 文件每秒最多读一次，切换后等 `--settle` 秒再打流。
 4. **命中校验**：on 块的融合命中数必须 > 0，否则这一块作废（否则等于在测同一个实现）。
 5. 统计：每个块记 p50/p90/吞吐；按 (off_i, on_i) 配对算比值，中位数 + bootstrap CI。
+6. **判定口径**（`optframe/contracts/README.md` §9）：延迟比必须超过噪声门限才算 KEEP，
+   只看 CI 下界 > 1.0 会把 ±1.5% 的漂移当成收益：
+
+   ```
+   KEEP          ⇔ n ≥ 2 且 CI 下界 > min_gain      # min_gain = 1 + noise_floor，默认 1.015
+   REVERT        ⇔ CI 上界 < 1.0                     # 确定比基线慢
+   INCONCLUSIVE  ⇔ 其余（带 reason）
+   ```
 
 用法：
     python tools/e2e_ab.py --url http://127.0.0.1:40012/v1 --model /model/Qwen3-8B \
         --flag /model/wyy/optframe/runs/fuse.flag --hits /model/wyy/optframe/runs/fuse_hits.log \
-        --blocks 8 --seconds 20 --concurrency 4 --prompt-chars 3000
+        --blocks 8 --seconds 20 --concurrency 4 --prompt-chars 3000 --min-gain 1.015
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import random
 import statistics
 import string
@@ -30,6 +39,11 @@ from typing import Dict, List, Optional
 
 _VOCAB = ("alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu "
           "nu xi omicron pi rho sigma tau upsilon phi chi psi omega").split()
+
+#: e2e 最小可判收益。依据：交替块实测块间漂移 1.5%–2.0%；
+#: n=3 时 bootstrap CI 半宽会缩到 0.4% 以下，不能拿 CI 半宽当门限。
+#: 口径写在 optframe/contracts/README.md §9。
+DEFAULT_MIN_GAIN = 1.015
 
 
 def _prompt(chars: int, rng: random.Random) -> str:
@@ -128,6 +142,58 @@ def bootstrap_median_ci(values: List[float], iters: int = 2000, alpha: float = 0
     return meds[int(iters * alpha / 2)], meds[int(iters * (1 - alpha / 2))]
 
 
+def decide(ci_lo: Optional[float], ci_hi: Optional[float],
+           min_gain: float = DEFAULT_MIN_GAIN, n_pairs: int = 2) -> tuple:
+    """按契约判定 e2e A/B，返回 (verdict, reason)。
+
+    规则（contracts/README.md §9）：
+      KEEP          n ≥ 2 且 CI 下界 > min_gain
+      REVERT        CI 上界 < 1.0（确定比基线慢）
+      INCONCLUSIVE  其余；reason ∈ insufficient_pairs / no_pairs /
+                    below_noise_floor / ci_spans_threshold / ci_spans_baseline
+
+    低于门限的差值不判 KEEP——e2e 的噪声量级就是 1.5% 上下，
+    点估计好看不代表方向可信。
+    """
+    if n_pairs < 2:
+        return ("INCONCLUSIVE", "insufficient_pairs")
+    if ci_lo is None or ci_hi is None or math.isnan(ci_lo) or math.isnan(ci_hi):
+        return ("INCONCLUSIVE", "no_pairs")
+    if ci_lo > min_gain:
+        return ("KEEP", None)
+    if ci_hi < 1.0:
+        return ("REVERT", "slower_than_baseline")
+    if ci_hi <= min_gain:
+        return ("INCONCLUSIVE", "below_noise_floor")
+    if ci_lo >= 1.0:
+        return ("INCONCLUSIVE", "ci_spans_threshold")
+    return ("INCONCLUSIVE", "ci_spans_baseline")
+
+
+def summarize_pairs(pairs: List[Dict[str, float]],
+                    min_gain: float = DEFAULT_MIN_GAIN) -> Dict[str, object]:
+    """配对比值 → 中位数、CI95、判定与门限字段（写进 e2e_ab.json 的那一份）。"""
+    out: Dict[str, object] = {
+        "n_pairs": len(pairs),
+        "min_gain": min_gain,
+        "noise_floor": round(min_gain - 1.0, 6),
+    }
+    lat = [p["lat_ratio"] for p in pairs]
+    if not lat:
+        out.update({"verdict": "INCONCLUSIVE", "verdict_reason": "no_pairs"})
+        return out
+    lo, hi = bootstrap_median_ci(lat)
+    verdict, reason = decide(lo, hi, min_gain=min_gain, n_pairs=len(pairs))
+    out.update({
+        "lat_ratio_median": statistics.median(lat),
+        "lat_ratio_ci": [lo, hi],
+        "rps_ratio_median": statistics.median(p["rps_ratio"] for p in pairs),
+        "verdict": verdict,
+        "verdict_reason": reason,
+    })
+    return out
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", default="http://127.0.0.1:40012/v1")
@@ -142,8 +208,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--settle", type=float, default=2.0, help="切开关后的等待秒数")
     ap.add_argument("--flush", action="store_true", help="每块开始前调用 /flush_cache")
     ap.add_argument("--warmup-block", action="store_true", help="先跑一个丢弃的热身块")
+    ap.add_argument("--min-gain", type=float, default=DEFAULT_MIN_GAIN,
+                    help="最小可判收益（延迟比），默认 1.015；KEEP 要求 CI 下界 > 该值")
     ap.add_argument("--out", default=None)
     args = ap.parse_args(argv)
+    if args.min_gain < 1.0:
+        ap.error(f"--min-gain 必须 ≥ 1.0（当前 {args.min_gain}）；门限 ≤ 1 等于不设门限")
 
     flag = Path(args.flag)
     hits = Path(args.hits)
@@ -197,19 +267,17 @@ def main(argv: Optional[List[str]] = None) -> int:
             continue
         pairs.append({"lat_ratio": o["p50"] / n["p50"], "rps_ratio": n["rps"] / o["rps"]})
 
-    summary = {"blocks": rows, "pairs": pairs}
+    summary: Dict[str, object] = {"blocks": rows, "pairs": pairs}
+    summary.update(summarize_pairs(pairs, args.min_gain))
     if pairs:
-        lat = [p["lat_ratio"] for p in pairs]
-        rps = [p["rps_ratio"] for p in pairs]
-        lo, hi = bootstrap_median_ci(lat)
-        summary["lat_ratio_median"] = statistics.median(lat)
-        summary["lat_ratio_ci"] = [lo, hi]
-        summary["rps_ratio_median"] = statistics.median(rps)
-        print(f"延迟比 (off/on) 中位 = {statistics.median(lat):.4f} CI95=[{lo:.4f}, {hi:.4f}]")
-        print(f"吞吐比 (on/off) 中位 = {statistics.median(rps):.4f}")
-        print("判定: " + ("KEEP（CI 下界 > 1.00）" if lo > 1.0 else "INCONCLUSIVE/REVERT"))
+        lo, hi = summary["lat_ratio_ci"]
+        print(f"延迟比 (off/on) 中位 = {summary['lat_ratio_median']:.4f} CI95=[{lo:.4f}, {hi:.4f}]")
+        print(f"吞吐比 (on/off) 中位 = {summary['rps_ratio_median']:.4f}")
+        reason = summary["verdict_reason"]
+        print(f"判定: {summary['verdict']}" + (f"（{reason}）" if reason else "")
+              + f"  min_gain={args.min_gain:.3f} noise_floor={args.min_gain - 1.0:.3f} n={summary['n_pairs']}")
     else:
-        print("没有有效配对（on 块无融合命中或数据缺失）")
+        print("没有有效配对（on 块无融合命中或数据缺失）→ INCONCLUSIVE(no_pairs)")
 
     if args.out:
         Path(args.out).write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")

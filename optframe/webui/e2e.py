@@ -32,6 +32,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--prompt-chars", type=int, default=12000)
     ap.add_argument("--max-tokens", type=int, default=8)
     ap.add_argument("--run-id", default="")
+    ap.add_argument("--min-gain", type=float, default=1.015,
+                    help="最小可判收益（延迟比），透传给 tools/e2e_ab.py")
     ap.add_argument("--max-used-gb", type=float, default=5.0)
     args = ap.parse_args(argv)
 
@@ -77,6 +79,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                "--concurrency", str(args.concurrency),
                "--prompt-chars", str(args.prompt_chars),
                "--max-tokens", str(args.max_tokens),
+               "--min-gain", str(args.min_gain),
                "--flush", "--warmup-block", "--out", str(result_json)]
         rc = subprocess.call(cmd, cwd=str(REPO))
         if not result_json.exists():
@@ -85,9 +88,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         data = json.loads(result_json.read_text(encoding="utf-8"))
         lat = data.get("lat_ratio_median")
         ci = data.get("lat_ratio_ci") or [None, None]
-        verdict = "KEEP" if (lat and ci[0] and ci[0] > 1.0) else "INCONCLUSIVE"
+        # 判定只认 tools/e2e_ab.py 按契约算出的结果，这里不再自己定标准
+        verdict = data.get("verdict") or "INCONCLUSIVE"
+        reason = data.get("verdict_reason")
         summary: Dict[str, Any] = {
             "run_id": run_id, "model": args.model, "verdict": verdict,
+            "verdict_reason": reason,
+            "min_gain": data.get("min_gain", args.min_gain),
+            "noise_floor": data.get("noise_floor", round(args.min_gain - 1.0, 6)),
+            "n_pairs": data.get("n_pairs", len(data.get("pairs") or [])),
             "lat_ratio_median": lat, "lat_ratio_ci": ci,
             "rps_ratio_median": data.get("rps_ratio_median"),
             "params": vars(args), "result": str(result_json),
@@ -95,7 +104,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         }
         (out_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2),
                                              encoding="utf-8")
-        print("[4/5] 结果:", lat, ci, "→", verdict)
+        print("[4/5] 结果:", lat, ci, "→", verdict + (f"（{reason}）" if reason else ""))
         print("JSON " + json.dumps(summary, ensure_ascii=False))
         return 0
     finally:

@@ -154,3 +154,59 @@ judge 侧同理：`allclose` 失败时返回首个最大误差的坐标与两侧
 - `tiers/simple.py`：候选进 `evaluate_fn` 之前先 lint；`errors` 非空 → 记 `INVALID`（`phase=lint`, `cache_policy=n/a`）并进重试队列，不占 GPU；
 - `warnings` 单独记一条 `LINT_WARN`，只留痕不阻断；
 - `run_simple_tier(..., lint=False)` 可关闭（供编排测试使用）。
+
+---
+
+## 9. 端到端 A/B（e2e）判定口径
+
+§3 判的是 kernel 冷缓存加速比；e2e 判的是"开/关回灌之后的请求延迟比"。两者的噪声量级不同，
+门限不能共用：kernel 级噪声 2%（`noise_floor_speedup = 1.02`），e2e 端到端的块间漂移是 1.5%–2.0%。
+
+### 量怎么算
+
+- `lat_ratio = p50(off) / p50(on)`，> 1 表示开回灌更快；配对数 `n` = 有效对（on 块融合命中 > 0 且两侧 p50 有效）；
+- 计时是 HTTP 请求墙钟（不是 CUDA event）；`--flush` 每块前冲 KV/radix cache，prompt 注入随机 nonce 强制 cache miss；
+- 每块固定时长打流，按 `(off_i, on_i)` 配对求比值，对**比值序列**取中位数 + 95% bootstrap CI。
+
+### 门限
+
+```
+min_gain = 1 + noise_floor_e2e        # 默认 noise_floor_e2e = 0.015，即 --min-gain 1.015
+```
+
+依据（2026-11-18，6 块 × 20s）：块间漂移实测 1.5%–2.0%（off 1825→1862ms、on 1816→1852ms，各 +2.0%）。
+配对能抵消同步漂移，但抵消不掉的是"每对里 on 总在第二个"的顺序偏倚，量级也在 1% 以上。
+n=3 时 bootstrap CI 半宽会缩到 0.02%–0.4%（2026-11-18 CI [1.0050, 1.0054]、2026-11-17 第 3 轮 CI [0.9995, 1.0073]），
+**CI 半宽是"配对内的精度"，不是"结论的可信度"，所以门限必须外部给定，不能由 CI 自己决定。**
+
+### 判定
+
+| verdict | 条件 | 含义 |
+| --- | --- | --- |
+| `KEEP` | `n ≥ 2` 且 `CI 下界 > min_gain` | 噪声之上确有收益，可以默认开启 |
+| `REVERT` | `CI 上界 < 1.0` | 确定比基线慢，不要开 |
+| `INCONCLUSIVE` | 其余 | 判不了，维持现状 |
+
+`INCONCLUSIVE` 必须带 `verdict_reason`：
+
+| reason | 含义 |
+| --- | --- |
+| `insufficient_pairs` | `n < 2`，单对没有区间可言 |
+| `no_pairs` | 没有有效配对（on 块无命中/数据缺失） |
+| `below_noise_floor` | `CI 上界 ≤ min_gain`：连收益上限都没到门限（典型 0.5%） |
+| `ci_spans_threshold` | 下界 ≥ 1.0 但上界 > `min_gain`：CI 跨过门限，方向对但样本/漂移不足 |
+| `ci_spans_baseline` | 下界 < 1.0 且上界 > `min_gain`：区间同时跨基线与门限，方向不明 |
+
+### 与 §3 的差别（为什么 REVERT 的含义不同）
+
+§3 的 `REVERT ⇔ CI 上界 < 1 + noise_floor`，因为那边 `REVERT` 表示"丢掉这个候选"；
+e2e 的 `REVERT` 只表示"确定比基线慢"，因为它的用途是**决定要不要默认开启**，而"略好但低于噪声"
+既不该说成收益，也不该说成回退——那种情况记 `INCONCLUSIVE(below_noise_floor)`，
+报告里写"方向一致、量级不足"。
+
+### 落点
+
+- `tools/e2e_ab.py`：`decide()` / `summarize_pairs()` 是唯一判定实现，`--min-gain` 默认 1.015；
+- `optframe/webui/e2e.py`：透传 `--min-gain`，**只读** `e2e_ab.json` 里的 `verdict`，不自己再判一遍；
+- 两个产物文件都必须带 `min_gain` / `noise_floor` / `n_pairs` / `verdict` / `verdict_reason`；
+- 测试：`tests/test_e2e_ab.py` 覆盖五个分支（含 `CI [1.005, 1.005]` 在 `--min-gain 1.015` 下必须是 `INCONCLUSIVE`）。
