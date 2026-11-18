@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ..inventory.taskspec import arch_for_hardware_exact
+
 _ARTIFACTS = [
     ("analysis", "bottlenecks.json"),
     ("capture", "capture.json"),
@@ -30,6 +32,43 @@ def _find_artifact(run_dir: Path, name: str) -> Optional[Path]:
         if cand.is_file():
             return cand
     return None
+
+
+def _norm_arch(value: Any) -> Optional[str]:
+    """架构名归一化：`sm_120` / `SM120` / `sm120` 都算同一个。"""
+    if not value:
+        return None
+    text = str(value).strip().lower().replace("-", "").replace("_", "")
+    return text or None
+
+
+def _rec_arch(rec: Dict[str, Any]) -> Optional[str]:
+    return _norm_arch((rec.get("artifacts") or {}).get("arch"))
+
+
+def _ledger_archs(path: Path) -> List[str]:
+    """只扫带 arch 的行，避免为大账本付全量解析成本。"""
+    found = set()
+    try:
+        with path.open(encoding="utf-8") as fh:
+            for line in fh:
+                if '"arch"' not in line:
+                    continue
+                try:
+                    arch = _rec_arch(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+                if arch:
+                    found.add(arch)
+    except OSError:
+        return []
+    return sorted(found)
+
+
+def _hw_arch(data: Dict[str, Any]) -> Optional[str]:
+    """分析产物只有 target.hardware；映射表命中才算，未知不给默认值。"""
+    hw = (data.get("target") or {}).get("hardware")
+    return _norm_arch(arch_for_hardware_exact(hw))
 
 
 def _summary(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -63,10 +102,22 @@ def scan_runs(root: Path) -> List[Dict[str, Any]]:
         if not kinds:
             continue
         entry: Dict[str, Any] = {"id": d.name, "mtime": int(d.stat().st_mtime),
-                                 "kinds": kinds, "summary": {}}
+                                 "kinds": kinds, "summary": {}, "archs": [],
+                                 "arch_source": ""}
+        ledger = _find_artifact(d, "ledger.jsonl")
+        if ledger is not None:
+            entry["archs"] = _ledger_archs(ledger)
+            if entry["archs"]:
+                entry["arch_source"] = "ledger"
         bn = _find_artifact(d, "bottlenecks.json")
         if bn is not None:
-            entry["summary"] = _summary(_read_json(bn) or {})
+            data = _read_json(bn) or {}
+            entry["summary"] = _summary(data)
+            if not entry["archs"]:
+                arch = _hw_arch(data)
+                if arch:
+                    entry["archs"] = [arch]
+                    entry["arch_source"] = "target.hardware"
         out.append(entry)
     return out
 
@@ -78,11 +129,14 @@ def load_run(root: Path, run_id: str) -> Optional[Dict[str, Any]]:
 
     payload: Dict[str, Any] = {"id": run_id, "mtime": int(d.stat().st_mtime),
                                "files": {}, "summary": {}, "rows": [],
-                               "ledger": [], "e2e": None, "tasks": None}
+                               "ledger": [], "e2e": None, "tasks": None,
+                               "archs": [], "arch_source": ""}
+    hw_arch: Optional[str] = None
 
     bn = _find_artifact(d, "bottlenecks.json")
     if bn is not None:
         data = _read_json(bn) or {}
+        hw_arch = _hw_arch(data)
         payload["files"]["bottlenecks"] = str(bn)
         payload["summary"] = _summary(data)
         rows = []
@@ -117,6 +171,13 @@ def load_run(root: Path, run_id: str) -> Optional[Dict[str, Any]]:
         except OSError:
             pass
         payload["ledger"] = recs[-50:]
+        payload["archs"] = sorted({a for a in (_rec_arch(x) for x in recs) if a})
+        if payload["archs"]:
+            payload["arch_source"] = "ledger"
+
+    if not payload["archs"] and hw_arch:
+        payload["archs"] = [hw_arch]
+        payload["arch_source"] = "target.hardware"
 
     e2e = _find_artifact(d, "e2e_ab.json")
     if e2e is None:
@@ -139,27 +200,44 @@ def load_run(root: Path, run_id: str) -> Optional[Dict[str, Any]]:
     return payload
 
 
-def _rows_by_key(run: Dict[str, Any]) -> Dict[tuple, float]:
-    out: Dict[tuple, float] = {}
+def _rows_by_key(run: Dict[str, Any]) -> Dict[tuple, Dict[str, Any]]:
+    out: Dict[tuple, Dict[str, Any]] = {}
     for r in run.get("rows") or []:
         ms = r.get("ms")
         if r.get("op") and ms:
-            out[(r["op"], r.get("shape"))] = float(ms)
+            out[(r["op"], r.get("shape"))] = {"ms": float(ms), "sol": r.get("sol")}
     return out
+
+
+def _arch_note(cur_archs: List[str], prev_archs: List[str]) -> str:
+    return f"{'/'.join(cur_archs) or '未记录'} vs {'/'.join(prev_archs) or '未记录'}"
 
 
 def diff_runs(root: Path, cur_id: str, prev_id: str) -> Dict[str, Any]:
     cur, prev = load_run(root, cur_id), load_run(root, prev_id)
     if not cur or not prev:
         return {"error": "run not found", "rows": []}
+    cur_archs, prev_archs = cur.get("archs") or [], prev.get("archs") or []
+    base = {"cur": cur_id, "prev": prev_id, "cur_archs": cur_archs,
+            "prev_archs": prev_archs, "arch_note": _arch_note(cur_archs, prev_archs)}
+    # 两侧都记了架构且没有交集时拒绝对比：不同卡的时间/SOL 不可比。
+    if cur_archs and prev_archs and not (set(cur_archs) & set(prev_archs)):
+        return dict(base, error="arch mismatch", arch_mismatch=True, rows=[])
+
     a, b = _rows_by_key(cur), _rows_by_key(prev)
     rows = []
-    for key, ms in a.items():
+    for key, now in a.items():
         old = b.get(key)
-        if not old:
+        if not old or not old.get("ms"):
             continue
-        rows.append({"op": key[0], "shape": key[1],
-                     "cur_ms": round(ms, 6), "prev_ms": round(old, 6),
-                     "delta_pct": round((ms / old - 1.0) * 100.0, 2)})
+        row: Dict[str, Any] = {"op": key[0], "shape": key[1],
+                               "cur_ms": round(now["ms"], 6),
+                               "prev_ms": round(old["ms"], 6),
+                               "delta_pct": round((now["ms"] / old["ms"] - 1.0) * 100.0, 2)}
+        if now.get("sol") is not None and old.get("sol") is not None:
+            row["cur_sol"] = now["sol"]
+            row["prev_sol"] = old["sol"]
+            row["d_sol"] = round(float(now["sol"]) - float(old["sol"]), 2)
+        rows.append(row)
     rows.sort(key=lambda x: x["delta_pct"])
-    return {"cur": cur_id, "prev": prev_id, "rows": rows}
+    return dict(base, arch_mismatch=False, rows=rows)

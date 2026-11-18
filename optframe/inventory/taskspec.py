@@ -27,20 +27,29 @@ ARCH_BY_HARDWARE = {
     "H800": "sm90",
     "B200": "sm100",
     "B300": "sm100",
+    "RTX PRO 5000": "sm120",
 }
 
 _SAFE_NAME = re.compile(r"[^a-z0-9_]+")
 
 
-def arch_for_hardware(hardware: Optional[str], fallback: str = "sm89") -> str:
-    """把硬件名映射成 arch；未知硬件给 fallback 并在 TaskSpec 里留痕。"""
+def arch_for_hardware_exact(hardware: Optional[str]) -> Optional[str]:
+    """只在映射表命中时返回 arch，未知硬件返回 None，不套默认值。
+
+    用于报告/台账标注架构：宁可显示“未记录”，也不要给一个错标签。
+    """
     if not hardware:
-        return fallback
+        return None
     key = hardware.strip().upper().replace("NVIDIA", "").strip()
     for name, arch in ARCH_BY_HARDWARE.items():
         if key.startswith(name.upper()):
             return arch
-    return fallback
+    return None
+
+
+def arch_for_hardware(hardware: Optional[str], fallback: str = "sm89") -> str:
+    """把硬件名映射成 arch；未知硬件给 fallback 并在 TaskSpec 里留痕。"""
+    return arch_for_hardware_exact(hardware) or fallback
 
 
 def parse_shapes(shape_field: str) -> List[List[int]]:

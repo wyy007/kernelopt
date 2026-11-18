@@ -14,6 +14,7 @@ from optframe.inventory.escalation import decide, should_escalate_after_best_of_
 from optframe.inventory.taskspec import (
     TaskSpec,
     arch_for_hardware,
+    arch_for_hardware_exact,
     parse_shapes,
     sanitize_name,
     shape_digest,
@@ -46,6 +47,14 @@ def test_arch_mapping():
     assert arch_for_hardware("NVIDIA H100") == "sm90"
     assert arch_for_hardware("B200") == "sm100"
     assert arch_for_hardware("UnknownCard") == "sm89"
+    assert arch_for_hardware("RTX PRO 5000") == "sm120"
+
+
+def test_arch_mapping_exact_does_not_guess():
+    assert arch_for_hardware_exact("RTX PRO 5000") == "sm120"
+    assert arch_for_hardware_exact("L20") == "sm89"
+    assert arch_for_hardware_exact("UnknownCard") is None
+    assert arch_for_hardware_exact("Blackwell") is None
 
 
 def test_task_toml_roundtrip():

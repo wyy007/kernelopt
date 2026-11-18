@@ -3,6 +3,7 @@ const state = {
   runs: [],
   run: null,
   diff: {},
+  diffArch: null,
   tab: 'list',
   autoOpenNewest: false,
   filter: 'all',
@@ -13,6 +14,10 @@ const state = {
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls) => { const e = document.createElement(tag); if (cls) e.className = cls; return e; };
 const fmt = (v, d = 2) => (v === null || v === undefined || v === '' ? '—' : Number(v).toFixed(d));
+const recArch = (x) => {
+  const a = ((x || {}).artifacts || {}).arch;
+  return a ? String(a).trim().toLowerCase().replace(/[-_]/g, '') : '架构未记';
+};
 
 async function getJSON(url) {
   if (window.SNAPSHOT && window.SNAPSHOT[url]) return window.SNAPSHOT[url];
@@ -44,9 +49,10 @@ function renderRuns() {
   const box = $('runs');
   box.innerHTML = '';
   for (const r of state.runs) {
+    const arch = (r.archs || []).length ? ' · ' + r.archs.join('/') : '';
     const row = el('div', 'run' + (state.run && state.run.id === r.id ? ' on' : ''));
     row.innerHTML = `<i></i><div class="t"><div class="n">${escapeHtml(r.id)}</div>
-      <div class="m">${timeStr(r.mtime)} · ${(r.kinds || []).join(' / ')}</div></div>`;
+      <div class="m">${timeStr(r.mtime)} · ${(r.kinds || []).join(' / ')}${escapeHtml(arch)}</div></div>`;
     row.onclick = () => openRun(r.id);
     box.appendChild(row);
   }
@@ -72,6 +78,7 @@ async function openRun(id) {
     return;
   }
   state.diff = {};
+  state.diffArch = null;
   state.prevId = null;
 
   const prev = state.runs.find((r) => r.id !== id && (r.kinds || []).includes('analysis')
@@ -80,6 +87,7 @@ async function openRun(id) {
     try {
       const d = await getJSON(`/api/diff?cur=${encodeURIComponent(id)}&prev=${encodeURIComponent(prev.id)}`);
       state.prevId = prev.id;
+      state.diffArch = d.arch_mismatch ? (d.arch_note || '架构不同') : null;
       for (const row of d.rows || []) {
         state.diff[row.op + '||' + row.shape] = row;
       }
@@ -101,8 +109,16 @@ function renderHeader() {
   $('s-findings').textContent = (r.summary && r.summary.findings) || 0;
   $('s-elig').textContent = (r.summary && r.summary.eligible) || 0;
   $('s-busy').textContent = r.summary && r.summary.gpu_busy != null ? fmt(r.summary.gpu_busy, 1) + '%' : '—';
-  $('s-prev').textContent = state.prevId || '无';
-  $('foot-right').textContent = state.prevId ? `回退判定：SOL 下降 ≥ 2pp 且占比 ≥ 1%` : '无历史基线，Δ 列不可用';
+  $('s-arch').textContent = (r.archs || []).length ? r.archs.join(' / ') : '未记录';
+  $('s-arch').title = r.arch_source === 'target.hardware' ? '按分析产物的 target.hardware 映射推断' : '';
+  const prevEl = $('s-prev');
+  prevEl.classList.toggle('d', !!state.diffArch);
+  prevEl.textContent = state.prevId
+    ? (state.diffArch ? `${state.prevId}（${state.diffArch}，已拒绝对比）` : state.prevId)
+    : '无';
+  $('foot-right').textContent = state.diffArch
+    ? `跨架构已拒绝对比（${state.diffArch}），Δ 列不可用`
+    : (state.prevId ? `回退判定：SOL 下降 ≥ 2pp 且占比 ≥ 1%` : '无历史基线，Δ 列不可用');
 }
 
 function rowDelta(row) {
@@ -198,7 +214,7 @@ function renderReport() {
     : '这个 run 还没有候选评测记录';
 
   $('rp-ledger').innerHTML = (last || []).map((x) =>
-    `<div>${escapeHtml(x.verdict)} · ratio ${fmt(x.ratio, 4)} · ${escapeHtml(x.generator || '')}</div>`).join('') || '—';
+    `<div>${escapeHtml(x.verdict)} · ratio ${fmt(x.ratio, 4)} · ${escapeHtml(recArch(x))} · ${escapeHtml(x.cache_policy || '口径未记')} · ${escapeHtml(x.generator || '')}</div>`).join('') || '—';
 
   const cap = r.capture;
   $('rp-capture').innerHTML = cap ? `
@@ -342,10 +358,14 @@ function bind() {
 }
 
 bind();
-// 支持 ?tab=run 直达（便于分享/截图）
-const m = new URLSearchParams(location.search).get('tab');
+// 支持 ?tab=run / ?run=<id> 直达（便于分享/截图）
+const params = new URLSearchParams(location.search);
+const m = params.get('tab');
 if (m) {
   const t = document.querySelector(`.tab[data-tab="${m}"]`);
   if (t) t.click();
 }
-boot();
+boot().then(() => {
+  const wantRun = params.get('run');
+  if (wantRun) openRun(wantRun);
+});
