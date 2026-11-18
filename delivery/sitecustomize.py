@@ -121,3 +121,12 @@ if os.environ.get("OPTFRAME_BACKFILL", "0") == "1":
     except Exception:  # noqa: BLE001 - 回灌失败必须静默放行
         pass
 
+# ---- MoE 路由探针（只观测，不改数值）----
+if os.environ.get("OPTFRAME_ROUTE_PROBE", "0") == "1":
+    try:
+        from optframe_delivery import probe_route
+
+        probe_route.install()
+    except Exception:  # noqa: BLE001 - 探针失败必须静默放行
+        pass
+
