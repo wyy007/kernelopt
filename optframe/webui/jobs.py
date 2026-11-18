@@ -175,12 +175,24 @@ def _build_e2e(p: Dict[str, Any]) -> List[str]:
     if not p.get("confirm"):
         raise ParamError("需要显式确认（勾选「我确认独占 GPU」）")
     model = _model_path(p.get("model") or "/model/Qwen3-8B")
+    order = str(p.get("order") or "alternate")
+    if order not in ("alternate", "abba"):
+        raise ParamError("order 只能是 alternate 或 abba")
+    blocks = int(p.get("blocks") or 6)
+    multiple = 4 if order == "abba" else 2
+    if blocks < multiple or blocks % multiple:
+        raise ParamError(f"{order} 顺序要求块数是 {multiple} 的倍数（当前 {blocks}）")
+    min_gain = float(p.get("min_gain") or 1.015)
+    if min_gain <= 1.0:
+        raise ParamError("min_gain 必须 > 1.0；门限 ≤ 1 等于不设门限")
     argv = [_python(), "-m", "optframe.webui.e2e", "--model", model,
-            "--blocks", str(int(p.get("blocks") or 6)),
+            "--blocks", str(blocks),
             "--seconds", str(float(p.get("seconds") or 20)),
             "--concurrency", str(int(p.get("concurrency") or 8)),
             "--prompt-chars", str(int(p.get("prompt_chars") or 12000)),
-            "--max-tokens", str(int(p.get("max_tokens") or 8))]
+            "--max-tokens", str(int(p.get("max_tokens") or 8)),
+            "--order", order,
+            "--min-gain", f"{min_gain:g}"]
     if p.get("run_id"):
         argv += ["--run-id", str(p["run_id"])]
     return argv
@@ -240,6 +252,10 @@ ACTIONS: Dict[str, Action] = {
             {"name": "seconds", "label": "每块秒数", "type": "number", "default": 20, "optional": True},
             {"name": "concurrency", "label": "并发", "type": "number", "default": 8, "optional": True},
             {"name": "prompt_chars", "label": "提示长度（字符）", "type": "number", "default": 12000, "optional": True},
+            {"name": "order", "label": "块顺序", "type": "select",
+             "options": ["alternate", "abba"], "default": "alternate", "optional": True},
+            {"name": "min_gain", "label": "最小可判收益", "type": "number",
+             "default": 1.015, "optional": True},
             {"name": "confirm", "label": "我确认独占 GPU", "type": "bool", "optional": False},
         ],
         build=_build_e2e,

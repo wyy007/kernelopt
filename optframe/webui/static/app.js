@@ -248,7 +248,9 @@ function renderReport() {
 
   const e = r.e2e;
   $('rp-e2e').textContent = e
-    ? `延迟比 ${fmt(e.lat_ratio_median, 4)} · CI [${fmt((e.lat_ratio_ci || [])[0], 4)}, ${fmt((e.lat_ratio_ci || [])[1], 4)}]`
+    ? `${escapeHtml(e.verdict || '—')}${e.verdict_reason ? `（${escapeHtml(e.verdict_reason)}）` : ''} · `
+      + `延迟比 ${fmt(e.lat_ratio_median, 4)} · CI [${fmt((e.lat_ratio_ci || [])[0], 4)}, ${fmt((e.lat_ratio_ci || [])[1], 4)}]`
+      + ` · 门限 ${fmt(e.min_gain, 3)} · ${escapeHtml(e.order || 'alternate')} · n=${e.n_pairs ?? '—'}`
     : '无 e2e 结果';
 }
 
@@ -270,8 +272,10 @@ async function loadActions() {
         : p.type === 'select'
         ? `<div class="field"><span>${escapeHtml(p.label)}</span>
              <select class="search" data-p="${escapeHtml(p.name)}" data-type="select">
-               ${((p.source === 'models' && models.length) ? models : [{ name: p.default || '（未发现模型）', path: p.default || '' }]).map((m) =>
-                 `<option value="${escapeHtml(m.path)}"${m.path === p.default ? ' selected' : ''}>${escapeHtml(m.name)}</option>`).join('')}
+               ${((p.source === 'models' && models.length)
+                   ? models.map((m) => ({ value: m.path, label: m.name }))
+                   : (p.options || []).map((o) => ({ value: o, label: o })))
+                 .map((o) => `<option value="${escapeHtml(o.value)}"${o.value === p.default ? ' selected' : ''}>${escapeHtml(o.label)}</option>`).join('')}
              </select></div>`
         : `<div class="field"><span>${escapeHtml(p.label)}</span>
              <input class="search" data-p="${escapeHtml(p.name)}" data-type="${escapeHtml(p.type || 'text')}"

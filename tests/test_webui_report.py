@@ -100,6 +100,20 @@ def test_ledger_arch_wins_over_hardware(tmp_path):
     assert run["arch_source"] == "ledger"
 
 
+def test_e2e_payload_keeps_order_and_noise_floor(tmp_path):
+    d = tmp_path / "e2e"
+    d.mkdir(parents=True)
+    (d / "e2e_ab.json").write_text(json.dumps({
+        "order": "abba", "min_gain": 1.015, "noise_floor": 0.015,
+        "verdict": "INCONCLUSIVE", "verdict_reason": "ci_spans_baseline",
+        "lat_ratio_median": 1.0106, "lat_ratio_ci": [0.9995, 1.0177], "n_pairs": 4,
+    }), encoding="utf-8")
+    run = report.load_run(tmp_path, "e2e")
+    assert run["e2e"]["order"] == "abba"
+    assert run["e2e"]["noise_floor"] == 0.015
+    assert run["e2e"]["verdict_reason"] == "ci_spans_baseline"
+
+
 def test_gate_fires_on_derived_arch(tmp_path):
     _run(tmp_path, "new", None, hardware="RTX PRO 5000")
     _run(tmp_path, "old", None, hardware="L20")
