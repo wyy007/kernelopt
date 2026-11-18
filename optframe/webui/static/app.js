@@ -110,7 +110,9 @@ function renderHeader() {
   $('s-elig').textContent = (r.summary && r.summary.eligible) || 0;
   $('s-busy').textContent = r.summary && r.summary.gpu_busy != null ? fmt(r.summary.gpu_busy, 1) + '%' : '—';
   $('s-arch').textContent = (r.archs || []).length ? r.archs.join(' / ') : '未记录';
-  $('s-arch').title = r.arch_source === 'target.hardware' ? '按分析产物的 target.hardware 映射推断' : '';
+  $('s-arch').title = r.arch_source === 'target.hardware'
+    ? '按分析产物的 target.hardware 映射推断'
+    : r.arch_source === 'analysis' ? '阶段2 实测写入 target.arch' : '';
   const prevEl = $('s-prev');
   prevEl.classList.toggle('d', !!state.diffArch);
   prevEl.textContent = state.prevId

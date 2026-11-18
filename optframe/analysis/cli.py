@@ -19,6 +19,8 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+from ..contracts.cuda_loader import device_arch
+from ..inventory.taskspec import arch_for_hardware_exact
 from .export import (
     build_report,
     infer_phase,
@@ -72,6 +74,17 @@ def _arch_name(path: Path) -> str:
         return "unknown"
 
 
+def _arch_target(hardware: str) -> tuple[Optional[str], str]:
+    """实测设备与硬件名一致时用实测；否则按硬件名映射。未知一律留空。"""
+    dev = device_arch()
+    mapped = arch_for_hardware_exact(hardware)
+    if dev and (not mapped or mapped == dev):
+        return dev, "device"
+    if mapped:
+        return mapped, "hardware_mapping"
+    return None, ""
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     args = _build_parser().parse_args(argv)
 
@@ -105,12 +118,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"[FAIL] 报表阶段失败: {exc}", file=sys.stderr)
         return 2
 
+    hardware = args.hardware or _arch_name(arch)
+    arch_value, arch_source = _arch_target(hardware)
     try:
         report = build_report(
             csv_dir,
             trace_path=trace,
             arch_path=arch,
-            hardware=args.hardware or _arch_name(arch),
+            hardware=hardware,
+            arch=arch_value,
+            arch_source=arch_source,
             framework=args.framework,
             model=args.model,
             tracelens_commit=tracelens_commit(Path(args.tracelens_src)),

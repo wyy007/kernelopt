@@ -65,10 +65,16 @@ def _ledger_archs(path: Path) -> List[str]:
     return sorted(found)
 
 
-def _hw_arch(data: Dict[str, Any]) -> Optional[str]:
-    """分析产物只有 target.hardware；映射表命中才算，未知不给默认值。"""
-    hw = (data.get("target") or {}).get("hardware")
-    return _norm_arch(arch_for_hardware_exact(hw))
+def _analysis_arch(data: Dict[str, Any]) -> tuple[Optional[str], str]:
+    """优先取阶段2实测写入的 target.arch；否则按 hardware 精确映射。"""
+    target = data.get("target") or {}
+    arch = _norm_arch(target.get("arch"))
+    if arch:
+        return arch, "analysis"
+    arch = _norm_arch(arch_for_hardware_exact(target.get("hardware")))
+    if arch:
+        return arch, "target.hardware"
+    return None, ""
 
 
 def _summary(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -114,10 +120,10 @@ def scan_runs(root: Path) -> List[Dict[str, Any]]:
             data = _read_json(bn) or {}
             entry["summary"] = _summary(data)
             if not entry["archs"]:
-                arch = _hw_arch(data)
+                arch, arch_source = _analysis_arch(data)
                 if arch:
                     entry["archs"] = [arch]
-                    entry["arch_source"] = "target.hardware"
+                    entry["arch_source"] = arch_source
         out.append(entry)
     return out
 
@@ -132,11 +138,12 @@ def load_run(root: Path, run_id: str) -> Optional[Dict[str, Any]]:
                                "ledger": [], "e2e": None, "tasks": None,
                                "archs": [], "arch_source": ""}
     hw_arch: Optional[str] = None
+    hw_arch_source = ""
 
     bn = _find_artifact(d, "bottlenecks.json")
     if bn is not None:
         data = _read_json(bn) or {}
-        hw_arch = _hw_arch(data)
+        hw_arch, hw_arch_source = _analysis_arch(data)
         payload["files"]["bottlenecks"] = str(bn)
         payload["summary"] = _summary(data)
         rows = []
@@ -177,7 +184,7 @@ def load_run(root: Path, run_id: str) -> Optional[Dict[str, Any]]:
 
     if not payload["archs"] and hw_arch:
         payload["archs"] = [hw_arch]
-        payload["arch_source"] = "target.hardware"
+        payload["arch_source"] = hw_arch_source
 
     e2e = _find_artifact(d, "e2e_ab.json")
     if e2e is None:

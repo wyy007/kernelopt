@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import datetime as _dt
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -144,6 +145,14 @@ def validate(payload: Dict[str, Any]) -> List[str]:
     if not isinstance(payload["findings"], list) or not payload["findings"]:
         errors.append("findings must be a non-empty list")
         return errors
+
+    target = payload.get("target") or {}
+    if target.get("arch") is not None:
+        arch = target.get("arch")
+        if not isinstance(arch, str) or not re.fullmatch(r"sm\d{2,3}", arch):
+            errors.append(f"target.arch must look like sm120, got {arch!r}")
+        if target.get("arch_source") not in ("device", "hardware_mapping", "arch_json"):
+            errors.append("target.arch_source must be device/hardware_mapping/arch_json")
 
     src = payload.get("source") or {}
     if not src.get("trace"):

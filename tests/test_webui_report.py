@@ -114,6 +114,18 @@ def test_e2e_payload_keeps_order_and_noise_floor(tmp_path):
     assert run["e2e"]["verdict_reason"] == "ci_spans_baseline"
 
 
+def test_analysis_target_arch_wins_over_hardware_mapping(tmp_path):
+    d = tmp_path / "a"
+    d.mkdir(parents=True)
+    (d / "bottlenecks.json").write_text(json.dumps({
+        "findings": [_finding()],
+        "target": {"hardware": "Blackwell", "arch": "sm120", "arch_source": "device"},
+    }), encoding="utf-8")
+    run = report.load_run(tmp_path, "a")
+    assert run["archs"] == ["sm120"]
+    assert run["arch_source"] == "analysis"
+
+
 def test_gate_fires_on_derived_arch(tmp_path):
     _run(tmp_path, "new", None, hardware="RTX PRO 5000")
     _run(tmp_path, "old", None, hardware="L20")

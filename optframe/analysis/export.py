@@ -46,6 +46,8 @@ def build_report(
     trace_path: str | Path,
     arch_path: str | Path,
     hardware: str = "unknown",
+    arch: Optional[str] = None,
+    arch_source: str = "",
     framework: str = "unknown",
     model: str = "unknown",
     tracelens_commit: Optional[str] = None,
@@ -158,7 +160,10 @@ def build_report(
         "report_csv_dir": str(csv_dir.resolve()),
     }
 
-    target = {"hardware": hardware, "framework": framework, "model": model}
+    target: Dict[str, Any] = {"hardware": hardware, "framework": framework, "model": model}
+    if arch:
+        target["arch"] = arch
+        target["arch_source"] = arch_source or "device"
 
     params = {
         "min_pct_e2e": min_pct_e2e,

@@ -25,6 +25,8 @@
       "type": "object",
       "properties": {
         "hardware": { "type": "string" },
+        "arch": { "type": "string", "pattern": "^sm[0-9]{2,3}$" },
+        "arch_source": { "type": "string", "enum": ["device", "hardware_mapping", "arch_json"] },
         "framework": { "type": "string" },
         "model": { "type": "string" }
       }

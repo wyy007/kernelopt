@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from optframe.analysis import ncu as ncu_mod
+from optframe.analysis import cli as cli_mod
 from optframe.analysis.export import build_report, write_json, write_topk_csv
 from optframe.analysis.filters import classify
 from optframe.analysis.parse import load_ops, load_timeline, normalize_bound, normalize_dtype
@@ -147,6 +148,43 @@ def test_build_report_and_validate(tmp_path):
 
     topk = write_topk_csv(report, tmp_path / "topk.csv")
     assert topk.exists() and len(topk.read_text().strip().splitlines()) >= 2
+
+
+def test_build_report_records_measured_arch(tmp_path):
+    csv_dir = make_csv_dir(tmp_path)
+    trace = tmp_path / "trace.json"
+    trace.write_text("{}")
+    arch = tmp_path / "RTX_PRO_5000.json"
+    arch.write_text(json.dumps({"name": "Blackwell"}))
+
+    report = build_report(
+        csv_dir, trace_path=trace, arch_path=arch, hardware="RTX PRO 5000",
+        arch="sm120", arch_source="device", run_id="t2",
+    )
+    payload = report.to_dict()
+    assert payload["target"]["arch"] == "sm120"
+    assert payload["target"]["arch_source"] == "device"
+    assert validate(payload) == []
+
+
+def test_validate_rejects_bad_target_arch(tmp_path):
+    csv_dir = make_csv_dir(tmp_path)
+    trace = tmp_path / "trace.json"
+    trace.write_text("{}")
+    report = build_report(
+        csv_dir, trace_path=trace, arch_path=trace,
+        arch="sm_120", arch_source="device",
+    )
+    errors = validate(report.to_dict())
+    assert any("target.arch" in e for e in errors)
+
+
+def test_arch_target_does_not_mislabel_old_trace_on_new_gpu(monkeypatch):
+    monkeypatch.setattr(cli_mod, "device_arch", lambda: "sm120")
+    assert cli_mod._arch_target("L20") == ("sm89", "hardware_mapping")
+    assert cli_mod._arch_target("RTX PRO 5000") == ("sm120", "device")
+    monkeypatch.setattr(cli_mod, "device_arch", lambda: None)
+    assert cli_mod._arch_target("Blackwell") == (None, "")
 
 
 def test_validate_rejects_measured_without_ncu(tmp_path):
