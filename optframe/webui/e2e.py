@@ -106,7 +106,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                                              encoding="utf-8")
         print("[4/5] 结果:", lat, ci, "→", verdict + (f"（{reason}）" if reason else ""))
         print("JSON " + json.dumps(summary, ensure_ascii=False))
-        return 0
+        # 与动作描述一致：非 KEEP 以退出码 1 结束（jobs 的 ok_codes 已把 1 当成功）
+        return 0 if verdict == "KEEP" else 1
     finally:
         if started:
             print("[5/5] 关闭服务")

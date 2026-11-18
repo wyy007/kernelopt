@@ -208,5 +208,6 @@ e2e 的 `REVERT` 只表示"确定比基线慢"，因为它的用途是**决定�
 
 - `tools/e2e_ab.py`：`decide()` / `summarize_pairs()` 是唯一判定实现，`--min-gain` 默认 1.015；
 - `optframe/webui/e2e.py`：透传 `--min-gain`，**只读** `e2e_ab.json` 里的 `verdict`，不自己再判一遍；
+  退出码 `KEEP=0`、其余 `1`（动作的 `ok_codes` 已把 1 当成功，不代表执行失败）；
 - 两个产物文件都必须带 `min_gain` / `noise_floor` / `n_pairs` / `verdict` / `verdict_reason`；
 - 测试：`tests/test_e2e_ab.py` 覆盖五个分支（含 `CI [1.005, 1.005]` 在 `--min-gain 1.015` 下必须是 `INCONCLUSIVE`）。
