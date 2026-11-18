@@ -204,6 +204,13 @@ e2e 的 `REVERT` 只表示"确定比基线慢"，因为它的用途是**决定�
 既不该说成收益，也不该说成回退——那种情况记 `INCONCLUSIVE(below_noise_floor)`，
 报告里写"方向一致、量级不足"。
 
+### 顺序要求
+
+- `--order alternate`（默认）off→on→off→on，配对是相邻块，但每对里 on 总在第二个；
+- `--order abba` off→on→on→off，配对自然变成 (b0,b1)、(b3,b2)…，on 块在一半配对里排在第一个；
+  **验“位置偏倦”时必须用这个**，块数要是 4 的倍数（8 块 = 4 对），产物 `pairs[]` 带
+  `off_block`/`on_block`/`on_first` 可核对。
+
 ### 落点
 
 - `tools/e2e_ab.py`：`decide()` / `summarize_pairs()` 是唯一判定实现，`--min-gain` 默认 1.015；

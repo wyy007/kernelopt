@@ -32,6 +32,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--prompt-chars", type=int, default=12000)
     ap.add_argument("--max-tokens", type=int, default=8)
     ap.add_argument("--run-id", default="")
+    ap.add_argument("--order", choices=("alternate", "abba"), default="alternate",
+                    help="块顺序（透传给 tools/e2e_ab.py）")
     ap.add_argument("--min-gain", type=float, default=1.015,
                     help="最小可判收益（延迟比），透传给 tools/e2e_ab.py")
     ap.add_argument("--max-used-gb", type=float, default=5.0)
@@ -79,6 +81,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                "--concurrency", str(args.concurrency),
                "--prompt-chars", str(args.prompt_chars),
                "--max-tokens", str(args.max_tokens),
+               "--order", args.order,
                "--min-gain", str(args.min_gain),
                "--flush", "--warmup-block", "--out", str(result_json)]
         rc = subprocess.call(cmd, cwd=str(REPO))

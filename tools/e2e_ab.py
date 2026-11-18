@@ -5,6 +5,8 @@
 1. **随机前缀**：同一 prompt 会被 SGLang radix cache 命中，M 掉到 decode 量级，
    `min_m=512` 直接把融合挡掉——每请求注入随机 nonce 强制 cache miss。
 2. **交替块**：off → on → off → on ...，同分钟窗口，消掉时钟/温度漂移。
+   默认 `--order alternate`；要验"每对的第二个块系统性偏快/偏慢"时用 `--order abba`
+   （off→on→on→off，让 on 块在一半的配对里排在第一个）。
 3. **开关落地确认**：flag 文件每秒最多读一次，切换后等 `--settle` 秒再打流。
 4. **命中校验**：on 块的融合命中数必须 > 0，否则这一块作废（否则等于在测同一个实现）。
 5. 统计：每个块记 p50/p90/吞吐；按 (off_i, on_i) 配对算比值，中位数 + bootstrap CI。
@@ -39,6 +41,10 @@ from typing import Dict, List, Optional
 
 _VOCAB = ("alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu "
           "nu xi omicron pi rho sigma tau upsilon phi chi psi omega").split()
+
+#: 块顺序。alternate = off→on→off→on…；abba = off→on→on→off，
+#: 后者的配对自然变成 (b0,b1)、(b3,b2)…，on 块在一半配对里靠前，能区分位置偏倚。
+ORDERS = {"alternate": ("off", "on"), "abba": ("off", "on", "on", "off")}
 
 #: e2e 最小可判收益。依据：交替块实测块间漂移 1.5%–2.0%；
 #: n=3 时 bootstrap CI 半宽会缩到 0.4% 以下，不能拿 CI 半宽当门限。
@@ -142,6 +148,29 @@ def bootstrap_median_ci(values: List[float], iters: int = 2000, alpha: float = 0
     return meds[int(iters * alpha / 2)], meds[int(iters * (1 - alpha / 2))]
 
 
+def block_modes(n_blocks: int, order: str = "alternate") -> List[str]:
+    """按块数展开出每块的开关状态。"""
+    if order not in ORDERS:
+        raise ValueError(f"未知顺序 {order}（可选：{', '.join(ORDERS)}）")
+    pattern = ORDERS[order]
+    if n_blocks <= 0:
+        raise ValueError(f"--blocks 必须 > 0（当前 {n_blocks}）")
+    if n_blocks % len(pattern):
+        raise ValueError(f"--order {order} 要求块数是 {len(pattern)} 的倍数（当前 {n_blocks}）")
+    return [pattern[i % len(pattern)] for i in range(n_blocks)]
+
+
+def pair_blocks(rows: List[Dict[str, object]]) -> List[tuple]:
+    """按出现顺序把 off/on 配成对（返回 (off_row, on_row)）。
+
+    alternate: (b0,b1)、(b2,b3)…；abba: (b0,b1)、(b3,b2)、(b4,b5)、(b7,b6)…
+    两种顺序下每对都是相邻块，且 abba 里 on 块交替占据第二个/第一个位置。
+    """
+    offs = [r for r in rows if r["mode"] == "off"]
+    ons = [r for r in rows if r["mode"] == "on"]
+    return list(zip(offs, ons))
+
+
 def decide(ci_lo: Optional[float], ci_hi: Optional[float],
            min_gain: float = DEFAULT_MIN_GAIN, n_pairs: int = 2) -> tuple:
     """按契约判定 e2e A/B，返回 (verdict, reason)。
@@ -201,6 +230,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--flag", default="/model/wyy/optframe/runs/fuse.flag")
     ap.add_argument("--hits", default="/model/wyy/optframe/runs/fuse_hits.log")
     ap.add_argument("--blocks", type=int, default=8, help="总块数（off/on 交替）")
+    ap.add_argument("--order", choices=sorted(ORDERS), default="alternate",
+                    help="块顺序：alternate=off/on 交替（默认）；abba=off/on/on/off，用于验顺序偏倚")
     ap.add_argument("--seconds", type=float, default=20.0, help="每块打流时长")
     ap.add_argument("--concurrency", type=int, default=4)
     ap.add_argument("--prompt-chars", type=int, default=3000)
@@ -237,8 +268,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("warmup block done (discarded)", flush=True)
 
     rows = []
-    for i in range(args.blocks):
-        mode = "off" if i % 2 == 0 else "on"
+    try:
+        modes = block_modes(args.blocks, args.order)
+    except ValueError as exc:
+        ap.error(str(exc))
+    for i, mode in enumerate(modes):
         set_flag(flag, 0 if mode == "off" else 1)
         time.sleep(args.settle)
         if args.flush:
@@ -258,16 +292,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     offs = [r for r in rows if r["mode"] == "off"]
     ons = [r for r in rows if r["mode"] == "on"]
     valid_ons = [r for r in ons if r["fused_hits"] > 0]
-    print(f"\non 块命中校验: {len(valid_ons)}/{len(ons)} 有效")
+    print(f"\non 块命中校验: {len(valid_ons)}/{len(ons)} 有效（顺序 {args.order}）")
 
     pairs = []
-    for i in range(min(len(offs), len(ons))):
-        o, n = offs[i], ons[i]
+    for o, n in pair_blocks(rows):
         if n["fused_hits"] <= 0 or o["p50"] <= 0 or n["p50"] <= 0:
             continue
-        pairs.append({"lat_ratio": o["p50"] / n["p50"], "rps_ratio": n["rps"] / o["rps"]})
+        pairs.append({"off_block": o["block"], "on_block": n["block"],
+                      "on_first": n["block"] < o["block"],
+                      "lat_ratio": o["p50"] / n["p50"], "rps_ratio": n["rps"] / o["rps"]})
 
-    summary: Dict[str, object] = {"blocks": rows, "pairs": pairs}
+    summary: Dict[str, object] = {"blocks": rows, "pairs": pairs, "order": args.order}
     summary.update(summarize_pairs(pairs, args.min_gain))
     if pairs:
         lo, hi = summary["lat_ratio_ci"]

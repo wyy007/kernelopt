@@ -97,6 +97,38 @@ def test_summarize_pairs_empty():
     assert out["verdict_reason"] == "no_pairs"
 
 
+def test_block_modes_alternate():
+    assert e2e_ab.block_modes(6, "alternate") == ["off", "on", "off", "on", "off", "on"]
+
+
+def test_block_modes_abba():
+    assert e2e_ab.block_modes(8, "abba") == [
+        "off", "on", "on", "off", "off", "on", "on", "off"]
+
+
+def test_block_modes_rejects_bad_counts():
+    for n in (6, 7, 0):
+        try:
+            e2e_ab.block_modes(n, "abba")
+        except ValueError as exc:
+            assert "倍数" in str(exc) or "blocks" in str(exc)
+        else:
+            raise AssertionError(f"abba 不该接受 {n} 块")
+
+
+def test_pair_blocks_abba_alternates_position():
+    # ABBA: off,on,on,off,off,on,on,off → 配对应为相邻块，且 on 块交替占第一位/第二位
+    rows = [{"block": i, "mode": m} for i, m in enumerate(e2e_ab.block_modes(8, "abba"))]
+    pairs = e2e_ab.pair_blocks(rows)
+    assert [(o["block"], n["block"]) for o, n in pairs] == [(0, 1), (3, 2), (4, 5), (7, 6)]
+    assert [n["block"] < o["block"] for o, n in pairs] == [False, True, False, True]
+
+
+def test_pair_blocks_alternate_is_sequential():
+    rows = [{"block": i, "mode": m} for i, m in enumerate(e2e_ab.block_modes(6, "alternate"))]
+    assert [(o["block"], n["block"]) for o, n in e2e_ab.pair_blocks(rows)] == [(0, 1), (2, 3), (4, 5)]
+
+
 def test_cli_rejects_uncapped_threshold():
     """--min-gain ≤ 1 等于不设门限，必须在跑任何块之前就被拒。"""
     for bad in ("1.0", "0.99"):
