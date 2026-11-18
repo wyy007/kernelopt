@@ -7,8 +7,13 @@
 """
 
 import math
+import subprocess
+import sys
+from pathlib import Path
 
 from tools import e2e_ab
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_default_min_gain_is_1_015():
@@ -90,3 +95,13 @@ def test_summarize_pairs_empty():
     assert out["n_pairs"] == 0
     assert out["verdict"] == "INCONCLUSIVE"
     assert out["verdict_reason"] == "no_pairs"
+
+
+def test_cli_rejects_uncapped_threshold():
+    """--min-gain ≤ 1 等于不设门限，必须在跑任何块之前就被拒。"""
+    for bad in ("1.0", "0.99"):
+        r = subprocess.run([sys.executable, str(ROOT / "tools" / "e2e_ab.py"),
+                            "--min-gain", bad],
+                           capture_output=True, text=True, timeout=30)
+        assert r.returncode == 2, r.stderr
+        assert "--min-gain" in r.stderr

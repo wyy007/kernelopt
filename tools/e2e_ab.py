@@ -212,8 +212,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="最小可判收益（延迟比），默认 1.015；KEEP 要求 CI 下界 > 该值")
     ap.add_argument("--out", default=None)
     args = ap.parse_args(argv)
-    if args.min_gain < 1.0:
-        ap.error(f"--min-gain 必须 ≥ 1.0（当前 {args.min_gain}）；门限 ≤ 1 等于不设门限")
+    if args.min_gain <= 1.0:
+        ap.error(f"--min-gain 必须 > 1.0（当前 {args.min_gain}）；门限 ≤ 1 等于不设门限")
 
     flag = Path(args.flag)
     hits = Path(args.hits)
