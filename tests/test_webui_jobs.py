@@ -73,6 +73,12 @@ def test_capture_requires_confirm():
         jobs._build_capture({})
 
 
+def test_capture_record_shapes_flag_is_opt_in():
+    assert "--record-shapes" not in jobs._build_capture({"confirm": True})
+    argv = jobs._build_capture({"confirm": True, "record_shapes": True})
+    assert "--record-shapes" in argv
+
+
 def test_analysis_passes_shape_hints_and_model():
     argv = jobs._build_analysis({
         "trace": "runs/x/a.trace.json.gz",

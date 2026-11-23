@@ -174,6 +174,8 @@ def _build_capture(p: Dict[str, Any]) -> List[str]:
         argv += ["--force-free"]
     if p.get("kernel_api"):
         argv += ["--kernel-api"]
+    if p.get("record_shapes"):
+        argv += ["--record-shapes"]
     if p.get("run_id"):
         argv += ["--run-id", str(p["run_id"])]
     return argv
@@ -333,6 +335,7 @@ ACTIONS: Dict[str, Action] = {
             {"name": "mem_fraction", "label": "显存占比", "type": "number", "default": 0.55, "optional": True},
             {"name": "context_length", "label": "上下文长度", "type": "number", "default": 8192, "optional": True},
             {"name": "kernel_api", "label": "记录 kernel API 日志（供 shape hints）", "type": "bool", "optional": True},
+            {"name": "record_shapes", "label": "记录张量形状（融合检测需要；trace 会大很多）", "type": "bool", "optional": True},
             {"name": "run_id", "label": "运行名", "type": "text",
              "placeholder": "留空自动生成", "optional": True},
             {"name": "confirm", "label": "我确认独占 GPU", "type": "bool", "optional": False},

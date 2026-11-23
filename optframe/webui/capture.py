@@ -199,6 +199,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--num-steps", type=int, default=30)
     ap.add_argument("--max-used-gb", type=float, default=5.0)
     ap.add_argument("--keep-service", action="store_true")
+    ap.add_argument("--record-shapes", action="store_true",
+                    help="让 profiler 记录张量形状（融合检测需要，trace 会大很多、服务会变慢）")
     ap.add_argument("--force-free", action="store_true",
                     help="GPU 被占用时自动停掉容器内的 sglang.launch_server")
     ap.add_argument("--kernel-api", action="store_true",
@@ -221,11 +223,40 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
 
     kernel_api_log = out_dir / "kernel_api.log"
-    kernel_env = (
-        f"SGLANG_KERNEL_API_LOGLEVEL=3 SGLANG_KERNEL_API_LOGDEST={kernel_api_log} "
-        if args.kernel_api else ""
-    )
-    env = (f"{kernel_env}SGLANG_TORCH_PROFILER_DIR={trace_dir} "
+    hints_path = out_dir / "shape_hints.json"
+
+    if args.kernel_api:
+        # kernel API 日志会让服务慢一个数量级；单独用一次短压测采形状，避免把
+        # profiler 窗口拖到几分钟导致导出超时、trace 被截断。
+        print("[0/8] 采 kernel API 形状（短压测，不 profile）…")
+        shape_log = out_dir / "service_shape.log"
+        env_shape = (
+            f"SGLANG_KERNEL_API_LOGLEVEL=3 SGLANG_KERNEL_API_LOGDEST={kernel_api_log} "
+            f"nohup python3 -m sglang.launch_server --model-path {args.model} "
+            f"--host 0.0.0.0 --port {PORT} --tp-size {args.tp} "
+            f"--context-length {args.context_length} --mem-fraction-static {args.mem_fraction} "
+            f"--dtype bfloat16 --disable-cuda-graph > {shape_log} 2>&1 &"
+        )
+        sh(["docker", "exec", "-d", CONTAINER, "bash", "-lc", env_shape], timeout=60)
+        if not wait_health(300):
+            print("[FAIL] 形状阶段服务未就绪，看", shape_log)
+            sh(["docker", "exec", CONTAINER, "bash", "-lc",
+                "pkill -9 -f sglang.launch_server || true"], timeout=60)
+            return 3
+        chat("hi", 8, args.model, timeout=180)
+        shape_stats = load(min(2, args.concurrency), min(3.0, args.seconds), args.isl, args.model)
+        print("       ", shape_stats)
+        sh(["docker", "exec", CONTAINER, "bash", "-lc",
+            "pkill -9 -f sglang.launch_server || true"], timeout=60)
+        time.sleep(2)
+        print("[hints] 自动识别 kernel API 日志并生成 shape hints …")
+        proc = sh([sys.executable, str(REPO / "tools" / "auto_shape_hints.py"),
+                   "--log", str(kernel_api_log), "--out", str(hints_path)], timeout=300)
+        tail = (proc.stdout or proc.stderr or "").strip().splitlines()[-3:]
+        for line in tail:
+            print("        " + line)
+
+    env = (f"SGLANG_TORCH_PROFILER_DIR={trace_dir} "
            f"nohup python3 -m sglang.launch_server --model-path {args.model} "
            f"--host 0.0.0.0 --port {PORT} --tp-size {args.tp} "
            f"--context-length {args.context_length} --mem-fraction-static {args.mem_fraction} "
@@ -245,7 +276,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("[4/7] start_profile …")
         req = urllib.request.Request(
             f"http://127.0.0.1:{PORT}/start_profile",
-            data=json.dumps({"num_steps": args.num_steps, "record_shapes": True}).encode(),
+            data=json.dumps({"num_steps": args.num_steps,
+                             "record_shapes": bool(args.record_shapes)}).encode(),
             headers={"Content-Type": "application/json"}, method="POST")
         with urllib.request.urlopen(req, timeout=60) as resp:
             resp.read()
@@ -259,27 +291,33 @@ def main(argv: Optional[List[str]] = None) -> int:
             req = urllib.request.Request(
                 f"http://127.0.0.1:{PORT}/stop_profile",
                 data=b"{}", headers={"Content-Type": "application/json"}, method="POST")
-            with urllib.request.urlopen(req, timeout=300) as resp:
+            with urllib.request.urlopen(req, timeout=600) as resp:
                 resp.read()
-        except Exception as exc:  # noqa: BLE001 - 某些版本返回 500 但 trace 已落盘
-            print(f"       stop_profile 返回异常（可忽略）：{exc}")
-
-        if started and not args.keep_service:
-            print("[6.2/7] 关闭服务，确保 trace 落盘结束 …")
-            sh(["docker", "exec", CONTAINER, "bash", "-lc",
-                "pkill -9 -f sglang.launch_server || true"], timeout=60)
-            started = False
-            time.sleep(2)
+        except Exception as exc:  # noqa: BLE001 - 超时/500 时导出可能仍在继续
+            print(f"       stop_profile 返回异常（继续等文件落盘）：{exc}")
 
         traces = sorted(out_dir.glob("*.trace.json.gz"), key=lambda p: p.stat().st_mtime)
         if not traces:
             print("[FAIL] 没有找到 trace 文件")
             return 4
         trace = traces[-1]
-        print("[6.5/7] 等 trace 落盘完成 …")
-        if not wait_trace_stable(trace, timeout_s=60):
-            print("[WARN] trace 大小 60s 内未稳定，仍尝试解析")
-        stats = trace_stats_retry(trace)
+        # 导出期间不能杀服务，否则 gzip 会被截断；等大小稳定后再关
+        print("[6.5/7] 等 profiler 导出完成（最多 600s）…")
+        if not wait_trace_stable(trace, timeout_s=600):
+            print("[WARN] trace 大小 600s 内未稳定，仍尝试解析")
+        if started and not args.keep_service:
+            print("[6.8/7] 关闭服务 …")
+            sh(["docker", "exec", CONTAINER, "bash", "-lc",
+                "pkill -9 -f sglang.launch_server || true"], timeout=60)
+            started = False
+            time.sleep(1)
+        try:
+            stats = trace_stats_retry(trace, attempts=6, wait_s=5.0)
+        except (EOFError, OSError, json.JSONDecodeError) as exc:
+            print(f"[FAIL] trace 不完整（profiler 导出可能被截断）：{type(exc).__name__}: {exc}")
+            print("       建议：关闭「记录张量形状」、seconds≤10、num_steps≤5、并发≤4；"
+                  f"文件保留在 {trace}")
+            return 6
 
         gates = {
             "size_ok": stats["size_mb"] >= 1.0,
@@ -288,15 +326,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         }
         verdict = "PASS" if all(gates.values()) else "WARN"
 
-        hints_path = out_dir / "shape_hints.json"
-        if args.kernel_api:
-            print("[hints] 自动识别 kernel API 日志并生成 shape hints …")
-            proc = sh([sys.executable, str(REPO / "tools" / "auto_shape_hints.py"),
-                       "--log", str(kernel_api_log), "--out", str(hints_path)], timeout=300)
-            tail = (proc.stdout or proc.stderr or "").strip().splitlines()[-3:]
-            for line in tail:
-                print("        " + line)
-
         result = {
             "run_id": run_id, "model": args.model, "trace": str(trace),
             "load": load_stats, "trace_stats": stats, "gates": gates, "verdict": verdict,
@@ -304,7 +333,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                        "seconds": args.seconds, "num_steps": args.num_steps,
                        "mem_fraction": args.mem_fraction,
                        "context_length": args.context_length,
-                       "kernel_api": bool(args.kernel_api)},
+                       "kernel_api": bool(args.kernel_api),
+                       "record_shapes": bool(args.record_shapes)},
             "kernel_api": str(kernel_api_log) if args.kernel_api else None,
             "shape_hints": str(hints_path) if hints_path.exists() else None,
             "created_at": round(time.time(), 3),
