@@ -136,3 +136,12 @@ def test_resolve_task_dir_rejects_ambiguous_parent(tmp_path):
     with pytest.raises(jobs.ParamError) as exc:
         jobs._resolve_task_dir(tmp_path / "pkg")
     assert "2 个任务" in str(exc.value)
+
+
+def test_autopipe_builder(tmp_path):
+    report = tmp_path / "bottlenecks.json"
+    report.write_text("{}", encoding="utf-8")
+    argv = jobs._build_autopipe({"report": str(report), "top_k": 3})
+    assert argv[2] == "optframe.webui.autopipe"
+    assert argv[argv.index("--report") + 1] == str(report)
+    assert argv[argv.index("--top-k") + 1] == "3"

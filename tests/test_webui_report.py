@@ -211,3 +211,12 @@ def test_load_run_exposes_path(tmp_path):
     d = _run(tmp_path, "a", "sm120")
     run = report.load_run(tmp_path, "a")
     assert run["path"] == str(d.resolve())
+
+
+def test_load_run_exposes_pipeline(tmp_path):
+    d = _run(tmp_path, "a", "sm120")
+    (d / "pipeline_report.json").write_text(
+        json.dumps({"summary": {"fused_keep": 1, "fused_total": 2}}), encoding="utf-8"
+    )
+    run = report.load_run(tmp_path, "a")
+    assert run["pipeline"]["summary"]["fused_keep"] == 1

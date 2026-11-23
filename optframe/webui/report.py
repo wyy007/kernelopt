@@ -279,6 +279,11 @@ def load_run(root: Path, run_id: str) -> Optional[Dict[str, Any]]:
         payload["files"]["tasks"] = str(tasks)
         payload["tasks"] = _read_json(tasks)
 
+    pipeline = _find_artifact(d, "pipeline_report.json")
+    if pipeline is not None:
+        payload["files"]["pipeline"] = str(pipeline)
+        payload["pipeline"] = _read_json(pipeline)
+
     model, model_source = _run_model(d, payload)
     payload["model"] = model
     payload["model_source"] = model_source

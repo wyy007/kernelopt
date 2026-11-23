@@ -252,6 +252,12 @@ def _build_preflight(p: Dict[str, Any]) -> List[str]:
     return [_python(), "-m", "optframe.preflight"]
 
 
+def _build_autopipe(p: Dict[str, Any]) -> List[str]:
+    report = _path_in_repo(p["report"])
+    return [_python(), "-m", "optframe.webui.autopipe",
+            "--report", report, "--top-k", str(int(p.get("top_k") or 5))]
+
+
 ACTIONS: Dict[str, Action] = {
     "preflight": Action(
         name="preflight", title="环境自检", needs_gpu=True, timeout_s=600,
@@ -274,6 +280,18 @@ ACTIONS: Dict[str, Action] = {
              "placeholder": "留空自动生成", "optional": True},
         ],
         build=_build_analysis,
+    ),
+    "autopipe": Action(
+        name="autopipe", title="自动生成并评测任务", needs_gpu=True, timeout_s=7200,
+        desc="从分析产物自动生成融合任务 + 单算子 Top-K 任务（排除专家/MoE），逐个评测，"
+             "结果写回该 run 的报告页。分析完成后会自动触发，一般不用手动点。",
+        params=[
+            {"name": "report", "label": "bottlenecks.json", "type": "path",
+             "placeholder": "runs/<analysis_run>/bottlenecks.json"},
+            {"name": "top_k", "label": "单算子任务数", "type": "number",
+             "default": 5, "optional": True},
+        ],
+        build=_build_autopipe,
     ),
     "shape_hints": Action(
         name="shape_hints", title="生成 shape hints", needs_gpu=False, timeout_s=300,
@@ -451,14 +469,36 @@ def _run_job(job: Job) -> None:
     finally:
         job.ended_at = time.time()
         job.save()
+        if job.status == "done":
+            _maybe_autopipe(job)
         threading.Thread(target=_worker_loop, daemon=True).start()
+
+
+def _maybe_autopipe(job: Job) -> None:
+    """分析成功后自动排队：生成融合/单算子任务并评测。"""
+    if job.action != "analysis":
+        return
+    run_id = str(job.params.get("run_id") or "")
+    if not run_id:
+        return
+    report = REPO / "runs" / run_id / "bottlenecks.json"
+    if not report.exists():
+        return
+    try:
+        submit("autopipe", {"report": f"runs/{run_id}/bottlenecks.json", "top_k": 5})
+    except Exception:  # noqa: BLE001 - 自动流水线失败不影响主任务
+        pass
 
 
 def submit(action_name: str, params: Dict[str, Any]) -> Job:
     if action_name not in ACTIONS:
         raise ParamError(f"未知动作：{action_name}")
-    argv = ACTIONS[action_name].build(params or {})
-    job = Job(id=uuid.uuid4().hex[:12], action=action_name, params=params or {}, argv=argv)
+    params = params or {}
+    if action_name == "analysis" and not params.get("run_id"):
+        # 先生成一次并写回参数，自动流水线才知道去哪个目录取 bottlenecks.json
+        params["run_id"] = _run_id(None)
+    argv = ACTIONS[action_name].build(params)
+    job = Job(id=uuid.uuid4().hex[:12], action=action_name, params=params, argv=argv)
     _jobs[job.id] = job
     job.save()
     global _worker

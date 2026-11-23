@@ -267,6 +267,27 @@ function renderReport() {
       + `延迟比 ${fmt(e.lat_ratio_median, 4)} · CI [${fmt((e.lat_ratio_ci || [])[0], 4)}, ${fmt((e.lat_ratio_ci || [])[1], 4)}]`
       + ` · 门限 ${fmt(e.min_gain, 3)} · ${escapeHtml(e.order || 'alternate')} · n=${e.n_pairs ?? '—'}`
     : '无 e2e 结果';
+
+  const pipe = r.pipeline;
+  const evalCell = (ev) => {
+    if (!ev) return '—';
+    if (ev.skipped) return `<span class="muted">跳过：${escapeHtml(ev.skipped)}</span>`;
+    if (ev.error) return `<span style="color:var(--red)">失败：${escapeHtml(ev.error)}</span>`;
+    const ci = ev.ci || [];
+    return `${escapeHtml(ev.verdict || '—')} · ratio ${fmt(ev.ratio, 4)}`
+      + ` · CI [${fmt(ci[0], 4)}, ${fmt(ci[1], 4)}]`;
+  };
+  const pipeRows = (list, withCoverage) => (list || []).map((t) =>
+    `<div>${escapeHtml(t.name)}${withCoverage && t.coverage_pct != null ? ` · 覆盖 ${fmt(t.coverage_pct, 2)}%` : ''}`
+    + ` · ${evalCell(t.eval)}</div>`).join('') || '<div class="muted">无</div>';
+  $('rp-pipeline').innerHTML = pipe ? `
+    <div class="card"><div class="k">自动任务流水线</div>
+      <div class="s">融合 ${pipe.summary ? pipe.summary.fused_keep : 0}/${pipe.summary ? pipe.summary.fused_total : 0} KEEP`
+      + ` · 单算子 ${pipe.summary ? pipe.summary.single_keep : 0}/${pipe.summary ? pipe.summary.single_total : 0} KEEP`
+      + ` · arch ${escapeHtml(pipe.arch || '—')}</div>
+      <div class="s" style="margin-top:8px"><b>融合任务</b></div>${pipeRows(pipe.fused && pipe.fused.tasks, true)}
+      <div class="s" style="margin-top:8px"><b>单算子任务</b></div>${pipeRows(pipe.single && pipe.single.tasks, true)}
+    </div>` : '';
 }
 
 async function loadActions() {
