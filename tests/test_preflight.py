@@ -148,6 +148,30 @@ def test_tasks_missing_skips(tmp_path):
     assert r.findings[-1].status == pf.SKIP
 
 
+def test_tasks_legacy_pack_is_skipped(tmp_path):
+    legacy = tmp_path / "legacy"
+    _task(legacy / "t1", "t1", "sm89")
+    (legacy / "LEGACY-sm89.md").write_text("历史基线，勿覆盖", encoding="utf-8")
+    new = tmp_path / "new"
+    _task(new / "t2", "t2", "sm120")
+
+    r = pf.Report()
+    pf.check_tasks(fake_info(), [legacy, new], r)
+    finding = r.findings[-1]
+    assert finding.status == pf.PASS
+    assert "跳过 1" in finding.detail
+
+
+def test_tasks_task_level_legacy_marker(tmp_path):
+    _task(tmp_path / "t1", "t1", "sm89")
+    (tmp_path / "t1" / "LEGACY-sm89.md").write_text("x", encoding="utf-8")
+    _task(tmp_path / "t2", "t2", "sm120")
+
+    r = pf.Report()
+    pf.check_tasks(fake_info(), [tmp_path], r)
+    assert r.findings[-1].status == pf.PASS
+
+
 # ---------------------------------------------------------------- 硬编码
 
 def test_scan_hardcoded_gencode(tmp_path):

@@ -213,16 +213,36 @@ def check_arch_baseline(info: Dict[str, Any], arch_dir: Path, report: Report) ->
     )
 
 
+def _is_legacy(path: Path) -> bool:
+    """目录（或任务目录）里有 LEGACY*.md 标记，视为历史基线，不参与架构比对。"""
+    return any(path.glob("LEGACY*.md"))
+
+
 def iter_task_tomls(dirs: Sequence[Path]) -> Iterable[Path]:
     seen = set()
     for base in dirs:
         if not base.exists():
             continue
+        if _is_legacy(base):
+            continue
         for path in base.rglob("task.toml"):
-            if path in seen:
+            if path in seen or _is_legacy(path.parent):
                 continue
             seen.add(path)
             yield path
+
+
+def count_legacy_tasks(dirs: Sequence[Path]) -> int:
+    """统计被 LEGACY 标记跳过的任务数（用于在结论里说明）。"""
+    total = 0
+    for base in dirs:
+        if not base.exists():
+            continue
+        if _is_legacy(base):
+            total += sum(1 for _ in base.rglob("task.toml"))
+            continue
+        total += sum(1 for path in base.rglob("task.toml") if _is_legacy(path.parent))
+    return total
 
 
 def task_arch(path: Path) -> Optional[str]:
@@ -237,8 +257,10 @@ def task_arch(path: Path) -> Optional[str]:
 def check_tasks(info: Dict[str, Any], task_dirs: Sequence[Path], report: Report) -> None:
     arch = info.get("arch")
     paths = list(iter_task_tomls(task_dirs))
+    legacy = count_legacy_tasks(task_dirs)
     if not paths:
-        report.add("tasks", SKIP, "没有找到 task.toml")
+        note = f"没有找到 task.toml（跳过 {legacy} 个 LEGACY 包）" if legacy else "没有找到 task.toml"
+        report.add("tasks", SKIP, note)
         return
     if not arch:
         report.add("tasks", SKIP, "无可用设备，跳过架构比对")
@@ -255,7 +277,10 @@ def check_tasks(info: Dict[str, Any], task_dirs: Sequence[Path], report: Report)
             mismatched.append(f"{path.parent.name}({declared})")
 
     if not mismatched:
-        report.add("tasks", PASS, f"{len(paths)} 个任务，arch 与设备一致（{arch}）")
+        note = f"{len(paths)} 个任务，arch 与设备一致（{arch}）"
+        if legacy:
+            note += f"；已跳过 {legacy} 个 LEGACY 包"
+        report.add("tasks", PASS, note)
         return
 
     sample = ", ".join(mismatched[:3])
@@ -426,7 +451,7 @@ def run_checks(
     check_arch_baseline(info, arch_dir, report)
     check_peak_baseline(info, report, skip=skip_peak_probe, arch_json=arch_json)
 
-    task_dirs = list(task_dirs or [Path("runs/stage3_tasks")])
+    task_dirs = list(task_dirs or [Path("runs/stage3_tasks_sm120"), Path("runs/stage3_tasks")])
     check_tasks(info, task_dirs, report)
 
     scan = list(scan_dirs or task_dirs)
