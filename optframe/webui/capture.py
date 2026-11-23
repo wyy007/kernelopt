@@ -150,6 +150,42 @@ def trace_stats(path: Path, window_est: bool = True) -> Dict[str, Any]:
     }
 
 
+def wait_trace_stable(trace: Path, timeout_s: float = 120.0) -> bool:
+    """等 trace 写完（profiler 落盘可能晚于 stop_profile 返回）。"""
+    deadline = time.time() + timeout_s
+    last = -1
+    stable = 0
+    while time.time() < deadline:
+        try:
+            size = trace.stat().st_size
+        except OSError:
+            time.sleep(1)
+            continue
+        if size > 0 and size == last:
+            stable += 1
+            if stable >= 2:
+                return True
+        else:
+            stable = 0
+            last = size
+        time.sleep(3)
+    return False
+
+
+def trace_stats_retry(trace: Path, attempts: int = 5, wait_s: float = 3.0) -> Dict[str, Any]:
+    """trace 可能还在写，EOF/解析失败时重试几次。"""
+    last_exc: Optional[Exception] = None
+    for i in range(attempts):
+        try:
+            return trace_stats(trace)
+        except (EOFError, OSError, json.JSONDecodeError) as exc:
+            last_exc = exc
+            if i + 1 < attempts:
+                time.sleep(wait_s)
+    assert last_exc is not None
+    raise last_exc
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="/model/Qwen3-8B")
@@ -228,13 +264,22 @@ def main(argv: Optional[List[str]] = None) -> int:
         except Exception as exc:  # noqa: BLE001 - 某些版本返回 500 但 trace 已落盘
             print(f"       stop_profile 返回异常（可忽略）：{exc}")
 
-        time.sleep(2)
+        if started and not args.keep_service:
+            print("[6.2/7] 关闭服务，确保 trace 落盘结束 …")
+            sh(["docker", "exec", CONTAINER, "bash", "-lc",
+                "pkill -9 -f sglang.launch_server || true"], timeout=60)
+            started = False
+            time.sleep(2)
+
         traces = sorted(out_dir.glob("*.trace.json.gz"), key=lambda p: p.stat().st_mtime)
         if not traces:
             print("[FAIL] 没有找到 trace 文件")
             return 4
         trace = traces[-1]
-        stats = trace_stats(trace)
+        print("[6.5/7] 等 trace 落盘完成 …")
+        if not wait_trace_stable(trace, timeout_s=60):
+            print("[WARN] trace 大小 60s 内未稳定，仍尝试解析")
+        stats = trace_stats_retry(trace)
 
         gates = {
             "size_ok": stats["size_mb"] >= 1.0,
@@ -242,6 +287,16 @@ def main(argv: Optional[List[str]] = None) -> int:
             "busy_ok": stats["busy_pct"] >= 5.0,
         }
         verdict = "PASS" if all(gates.values()) else "WARN"
+
+        hints_path = out_dir / "shape_hints.json"
+        if args.kernel_api:
+            print("[hints] 自动识别 kernel API 日志并生成 shape hints …")
+            proc = sh([sys.executable, str(REPO / "tools" / "auto_shape_hints.py"),
+                       "--log", str(kernel_api_log), "--out", str(hints_path)], timeout=300)
+            tail = (proc.stdout or proc.stderr or "").strip().splitlines()[-3:]
+            for line in tail:
+                print("        " + line)
+
         result = {
             "run_id": run_id, "model": args.model, "trace": str(trace),
             "load": load_stats, "trace_stats": stats, "gates": gates, "verdict": verdict,
@@ -251,6 +306,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                        "context_length": args.context_length,
                        "kernel_api": bool(args.kernel_api)},
             "kernel_api": str(kernel_api_log) if args.kernel_api else None,
+            "shape_hints": str(hints_path) if hints_path.exists() else None,
             "created_at": round(time.time(), 3),
         }
         (out_dir / "capture.json").write_text(json.dumps(result, ensure_ascii=False, indent=2),

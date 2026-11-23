@@ -84,39 +84,38 @@ def test_analysis_passes_shape_hints_and_model():
     assert argv[argv.index("--framework") + 1] == "sglang"
 
 
-def test_shape_hints_builds_argv():
+def test_shape_hints_uses_auto_tool(tmp_path):
+    log = tmp_path / "kernel_api.log"
+    log.write_text("x", encoding="utf-8")
     argv = jobs._build_shape_hints({
-        "log": "runs/c/kernel_api.log", "op": "outplace_fused_experts",
-        "min_m": 16, "max_m": 0, "out": "runs/c/hints.json",
+        "log": str(log), "out": "runs/c/hints.json",
     })
-    assert argv[1].endswith("tools/extract_kernel_shapes.py")
-    assert argv[argv.index("--op") + 1] == "outplace_fused_experts"
-    assert argv[argv.index("--min-m") + 1] == "16"
+    assert argv[1].endswith("tools/auto_shape_hints.py")
+    assert argv[argv.index("--log") + 1] == str(log)
     assert argv[argv.index("--out") + 1].endswith("runs/c/hints.json")
+    assert "--op" not in argv
 
 
-def test_shape_hints_rejects_unknown_op():
+def test_shape_hints_auto_picks_latest_log(tmp_path, monkeypatch):
+    monkeypatch.setattr(jobs, "REPO", tmp_path)
+    d = tmp_path / "runs" / "cap"
+    d.mkdir(parents=True)
+    (d / "kernel_api.log").write_text("x", encoding="utf-8")
+    argv = jobs._build_shape_hints({"out": "runs/h.json"})
+    assert argv[argv.index("--log") + 1] == str(d / "kernel_api.log")
+
+
+def test_shape_hints_requires_log_when_none(tmp_path, monkeypatch):
+    monkeypatch.setattr(jobs, "REPO", tmp_path)
     with pytest.raises(jobs.ParamError):
-        jobs._build_shape_hints({"log": "runs/c/kernel_api.log", "op": "foo"})
+        jobs._build_shape_hints({"out": "runs/h.json"})
 
 
-def test_shape_hints_auto_match_and_bits_by_op():
-    moe = jobs._build_shape_hints({
-        "log": "runs/c/kernel_api.log", "op": "outplace_fused_experts",
-        "out": "runs/c/h.json",
-    })
-    assert moe[moe.index("--match") + 1] == "fused_moe"
-    assert moe[moe.index("--weight-bits") + 1] == "8"
-
-    marlin = jobs._build_shape_hints({
-        "log": "runs/c/kernel_api.log", "op": "gptq_marlin_gemm", "out": "runs/c/h.json",
-    })
-    assert marlin[marlin.index("--match") + 1] == "marlin"
-    assert marlin[marlin.index("--weight-bits") + 1] == "4"
-
-    custom = jobs._build_shape_hints({
-        "log": "runs/c/kernel_api.log", "op": "fp8_blockwise_scaled_mm",
-        "match": "my_kernel", "weight_bits": 4, "out": "runs/c/h.json",
-    })
-    assert custom[custom.index("--match") + 1] == "my_kernel"
-    assert custom[custom.index("--weight-bits") + 1] == "4"
+def test_analysis_auto_uses_hints_next_to_trace(tmp_path):
+    d = tmp_path / "run"
+    d.mkdir()
+    (d / "shape_hints.json").write_text("{}", encoding="utf-8")
+    trace = d / "x.trace.json.gz"
+    trace.write_text("", encoding="utf-8")
+    argv = jobs._build_analysis({"trace": str(trace)})
+    assert argv[argv.index("--shape-hints") + 1] == str(d / "shape_hints.json")

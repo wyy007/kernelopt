@@ -98,41 +98,37 @@ def _build_analysis(p: Dict[str, Any]) -> List[str]:
             "--framework", str(p.get("framework") or "sglang"),
             "--model", str(p.get("model") or "qwen3-8b")]
     hints = str(p.get("shape_hints") or "").strip()
+    if not hints:
+        # 采集时自动生成的 hints 就在 trace 同目录，默认直接用
+        auto = Path(trace).parent / "shape_hints.json"
+        if auto.exists():
+            hints = str(auto)
     if hints:
         argv += ["--shape-hints", _path_in_repo(hints)]
     return argv
 
 
 _HINT_OPS = ("gptq_marlin_gemm", "fp8_blockwise_scaled_mm", "outplace_fused_experts")
-#: hints 里的 match 会被 analysis 当正则匹配 finding.op / kernel，必须对准实际核名
-_HINT_MATCH = {
-    "gptq_marlin_gemm": "marlin",
-    "fp8_blockwise_scaled_mm": "fp8_blockwise_scaled_mm",
-    "outplace_fused_experts": "fused_moe",
-}
-#: 默认权重位宽（fp8 权重 = 8 bit）
-_HINT_BITS = {"gptq_marlin_gemm": 4, "fp8_blockwise_scaled_mm": 8, "outplace_fused_experts": 8}
+def _latest_kernel_log() -> str:
+    cands = sorted(
+        (REPO / "runs").glob("*/kernel_api.log"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    return str(cands[0]) if cands else ""
 
 
 def _build_shape_hints(p: Dict[str, Any]) -> List[str]:
-    """从 capture 的 kernel_api.log 提取形状，产出 analysis --shape-hints 文件。"""
-    log = _path_in_repo(p["log"])
-    op = str(p.get("op") or "gptq_marlin_gemm")
-    if op not in _HINT_OPS:
-        raise ParamError(f"op 只能是 {', '.join(_HINT_OPS)}")
-    match = str(p.get("match") or "").strip() or _HINT_MATCH[op]
-    bits = p.get("weight_bits")
-    bits = _HINT_BITS[op] if bits in (None, "") else int(bits)
+    """自动识别 kernel_api.log 里的已知核并生成 hints（无需选算子）。"""
+    raw_log = str(p.get("log") or "").strip()
+    log = _path_in_repo(raw_log) if raw_log else _latest_kernel_log()
+    if not log or not Path(log).exists():
+        raise ParamError("没有找到 kernel_api.log；请先勾选「记录 kernel API 日志」跑一次采集")
     out = str(p.get("out") or f"runs/shape_hints_{int(time.time())}.json").strip()
     if not out.startswith("runs/"):
         raise ParamError("out 必须以 runs/ 开头")
-    return [_python(), "tools/extract_kernel_shapes.py",
-            "--log", log, "--op", op, "--out", str(REPO / out),
-            "--match", match,
-            "--min-m", str(int(p.get("min_m") or 0)),
-            "--max-m", str(int(p.get("max_m") or 0)),
-            "--weight-bits", str(bits),
-            "--tag", str(p.get("tag") or "all")]
+    return [_python(), "tools/auto_shape_hints.py",
+            "--log", log, "--out", str(REPO / out)]
 
 
 def _build_fusion_tasks(p: Dict[str, Any]) -> List[str]:
@@ -271,21 +267,11 @@ ACTIONS: Dict[str, Action] = {
     ),
     "shape_hints": Action(
         name="shape_hints", title="生成 shape hints", needs_gpu=False, timeout_s=300,
-        desc="从采集时打开的 kernel_api.log 里提取自定义核的完整形状，产出 analysis 可直接用的 hints JSON。"
-             "采集时需勾选「记录 kernel API 日志」。",
+        desc="自动扫描 kernel_api.log 里出现的已知核（marlin / fp8_blockwise_scaled_mm / outplace_fused_experts），"
+             "逐个生成形状提示并合并成一个 JSON；不需要选算子。采集时勾「记录 kernel API 日志」即可。",
         params=[
             {"name": "log", "label": "kernel_api.log", "type": "path",
-             "placeholder": "runs/<capture_run>/kernel_api.log"},
-            {"name": "op", "label": "算子", "type": "select",
-             "options": ["gptq_marlin_gemm", "fp8_blockwise_scaled_mm", "outplace_fused_experts"],
-             "default": "gptq_marlin_gemm"},
-            {"name": "match", "label": "匹配标记（hints 绑定的核名正则）", "type": "text",
-             "placeholder": "留空按算子自动：marlin / fp8_blockwise_scaled_mm / fused_moe",
-             "optional": True},
-            {"name": "min_m", "label": "最小 M（0=不限）", "type": "number", "default": 0, "optional": True},
-            {"name": "max_m", "label": "最大 M（0=不限）", "type": "number", "default": 0, "optional": True},
-            {"name": "weight_bits", "label": "权重位宽（fp8=8 / int4=4，留空按算子）", "type": "number",
-             "optional": True},
+             "placeholder": "留空自动选最新一次采集的 kernel_api.log", "optional": True},
             {"name": "out", "label": "输出 JSON", "type": "text",
              "placeholder": "留空自动生成 runs/shape_hints_<ts>.json", "optional": True},
         ],
