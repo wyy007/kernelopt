@@ -191,3 +191,17 @@ def test_delete_run_rejects_special_names(tmp_path):
     assert report.delete_run(tmp_path, "../ok")[0] is False
     assert report.delete_run(tmp_path, "..")[0] is False
     assert report.delete_run(tmp_path, "missing")[0] is False
+
+
+def test_list_tasks_scans_task_dirs(tmp_path):
+    run = tmp_path / "run1"
+    task = run / "t1"
+    task.mkdir(parents=True)
+    (task / "task.toml").write_text(
+        '[task]\nname = "t1"\nkind = "fused"\n', encoding="utf-8"
+    )
+    out = report.list_tasks(tmp_path)
+    assert len(out) == 1
+    assert out[0]["name"] == "t1"
+    assert out[0]["kind"] == "fused"
+    assert out[0]["run"] == "run1"

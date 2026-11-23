@@ -118,3 +118,21 @@ def test_analysis_auto_uses_hints_next_to_trace(tmp_path):
     trace.write_text("", encoding="utf-8")
     argv = jobs._build_analysis({"trace": str(trace)})
     assert argv[argv.index("--shape-hints") + 1] == str(d / "shape_hints.json")
+
+
+def test_resolve_task_dir_accepts_single_subdir(tmp_path):
+    task = tmp_path / "pkg" / "t1"
+    task.mkdir(parents=True)
+    (task / "task.toml").write_text("[task]\n", encoding="utf-8")
+    assert jobs._resolve_task_dir(tmp_path / "pkg") == str(task)
+    assert jobs._resolve_task_dir(task) == str(task)
+
+
+def test_resolve_task_dir_rejects_ambiguous_parent(tmp_path):
+    for name in ("t1", "t2"):
+        task = tmp_path / "pkg" / name
+        task.mkdir(parents=True)
+        (task / "task.toml").write_text("[task]\n", encoding="utf-8")
+    with pytest.raises(jobs.ParamError) as exc:
+        jobs._resolve_task_dir(tmp_path / "pkg")
+    assert "2 个任务" in str(exc.value)

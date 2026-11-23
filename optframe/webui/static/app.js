@@ -266,30 +266,47 @@ function renderReport() {
 async function loadActions() {
   const box = $('actions');
   let models = [];
+  let tasks = [];
   try {
     const md = await getJSON('/api/models');
     models = md.models || [];
+  } catch (e) { /* 忽略 */ }
+  try {
+    const td = await getJSON('/api/tasks');
+    tasks = td.tasks || [];
   } catch (e) { /* 忽略 */ }
   try {
     const data = await getJSON('/api/actions');
     box.innerHTML = '';
     for (const a of data.actions || []) {
       const card = el('div', 'card');
-      const fields = (a.params || []).map((p) => (p.type === 'bool'
-        ? `<div class="field"><span>${escapeHtml(p.label)}</span>
-             <input type="checkbox" data-p="${escapeHtml(p.name)}" data-type="bool"></div>`
-        : p.type === 'select'
-        ? `<div class="field"><span>${escapeHtml(p.label)}</span>
+      const fieldHtml = (p) => {
+        if (p.type === 'bool') {
+          return `<div class="field"><span>${escapeHtml(p.label)}</span>
+             <input type="checkbox" data-p="${escapeHtml(p.name)}" data-type="bool"></div>`;
+        }
+        if (p.type === 'select') {
+          let opts = null;
+          if (p.source === 'models' && models.length) {
+            opts = models.map((m) => ({ value: m.path, label: m.name }));
+          } else if (p.source === 'tasks' && tasks.length) {
+            opts = tasks.map((t) => ({ value: t.path, label: `${t.name} · ${t.kind}` }));
+          } else if (p.options) {
+            opts = p.options.map((o) => ({ value: o, label: o }));
+          }
+          if (opts && opts.length) {
+            return `<div class="field"><span>${escapeHtml(p.label)}</span>
              <select class="search" data-p="${escapeHtml(p.name)}" data-type="select">
-               ${((p.source === 'models' && models.length)
-                   ? models.map((m) => ({ value: m.path, label: m.name }))
-                   : (p.options || []).map((o) => ({ value: o, label: o })))
-                 .map((o) => `<option value="${escapeHtml(o.value)}"${o.value === p.default ? ' selected' : ''}>${escapeHtml(o.label)}</option>`).join('')}
-             </select></div>`
-        : `<div class="field"><span>${escapeHtml(p.label)}</span>
+               ${opts.map((o) => `<option value="${escapeHtml(o.value)}"${o.value === p.default ? ' selected' : ''}>${escapeHtml(o.label)}</option>`).join('')}
+             </select></div>`;
+          }
+        }
+        return `<div class="field"><span>${escapeHtml(p.label)}</span>
              <input class="search" data-p="${escapeHtml(p.name)}" data-type="${escapeHtml(p.type || 'text')}"
                     placeholder="${escapeHtml(p.placeholder || '')}"
-                    value="${escapeHtml(p.default ?? '')}"></div>`)).join('');
+                    value="${escapeHtml(p.default ?? '')}"></div>`;
+      };
+      const fields = (a.params || []).map(fieldHtml).join('');
       card.innerHTML = `<div class="k">${escapeHtml(a.title)}${a.needs_gpu ? ' · 需 GPU' : ''}${
         a.danger ? ' · <span style="color:var(--red)">危险</span>' : ''}</div>
         <div class="s" style="margin:6px 0 8px">${escapeHtml(a.desc)}</div>${fields}
@@ -319,7 +336,8 @@ async function submitAction(name, card) {
     if (!r.ok) throw new Error(job.error || r.status);
     watchJob(job.id);
   } catch (e) {
-    $('job-head').textContent = '提交失败：' + String(e);
+    $('job-head').textContent = '提交失败';
+    $('job-log').textContent = '提交失败：' + String(e);
   }
 }
 

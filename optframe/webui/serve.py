@@ -83,6 +83,8 @@ class Handler(BaseHTTPRequestHandler):
             cur = (qs.get("cur") or [""])[0]
             prev = (qs.get("prev") or [""])[0]
             return self._json(report.diff_runs(ROOT, cur, prev))
+        if rest == ["tasks"]:
+            return self._json({"tasks": report.list_tasks(ROOT)})
         if rest == ["models"]:
             base = Path("/model")
             items = []

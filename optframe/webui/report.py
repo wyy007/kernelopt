@@ -174,6 +174,34 @@ def delete_run(root: Path, run_id: str) -> tuple[bool, str]:
     return True, str(dest)
 
 
+def list_tasks(root: Path) -> List[Dict[str, Any]]:
+    """列出 runs/<run>/<task>/task.toml 的任务包（供页面下拉选择）。"""
+    out: List[Dict[str, Any]] = []
+    if not root.exists():
+        return out
+    for run_dir in sorted(root.iterdir()):
+        if not run_dir.is_dir() or run_dir.name.startswith("_"):
+            continue
+        for task_toml in sorted(run_dir.glob("*/task.toml")):
+            try:
+                text = task_toml.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            name = re.search(r'^\s*name\s*=\s*"([^"]+)"', text, re.MULTILINE)
+            kind = re.search(r'^\s*kind\s*=\s*"([^"]+)"', text, re.MULTILINE)
+            out.append(
+                {
+                    "path": str(task_toml.parent),
+                    "name": name.group(1) if name else task_toml.parent.name,
+                    "kind": kind.group(1) if kind else "single",
+                    "run": run_dir.name,
+                }
+            )
+            if len(out) >= 500:
+                return out
+    return out
+
+
 def load_run(root: Path, run_id: str) -> Optional[Dict[str, Any]]:
     d = root / run_id
     if not d.is_dir():

@@ -177,10 +177,22 @@ def _build_capture(p: Dict[str, Any]) -> List[str]:
     return argv
 
 
+def _resolve_task_dir(value: Any) -> str:
+    """接受单个任务目录；也接受只含一个任务的父目录（多任务时要求明确选择）。"""
+    p = Path(_path_in_repo(value))
+    if (p / "task.toml").exists():
+        return str(p)
+    subs = sorted(x.parent for x in p.glob("*/task.toml"))
+    if len(subs) == 1:
+        return str(subs[0])
+    if subs:
+        names = ", ".join(x.name for x in subs[:5])
+        raise ParamError(f"这个目录下有 {len(subs)} 个任务，请选择具体一个：{names}")
+    raise ParamError("目录里没有 task.toml；融合任务在子目录里，例如 runs/xxx/fused__swiglu__...")
+
+
 def _build_fusion_eval(p: Dict[str, Any]) -> List[str]:
-    task = _path_in_repo(p["task"])
-    if not (Path(task) / "task.toml").exists():
-        raise ParamError("task 目录里没有 task.toml")
+    task = _resolve_task_dir(p["task"])
     gen = str(p.get("generator") or "fixture")
     if gen not in ("fixture", "llm"):
         raise ParamError("generator 只能是 fixture 或 llm")
@@ -280,8 +292,8 @@ ACTIONS: Dict[str, Action] = {
         desc="对一个 kind=fused 任务跑 best-of-N 与冷缓存 A/B，产出 KEEP/REVERT 与账本。"
              "fixture 模式用内置核验证链路，llm 模式调驱动模型生成候选。",
         params=[
-            {"name": "task", "label": "融合任务目录", "type": "path",
-             "placeholder": "runs/fusion_tasks_8b/fused__swiglu__8192x4096x24576"},
+            {"name": "task", "label": "融合任务（下拉选择）", "type": "select",
+             "source": "tasks"},
             {"name": "generator", "label": "生成器（fixture/llm）", "type": "text",
              "default": "fixture", "optional": True},
             {"name": "model", "label": "驱动模型（llm 时用）", "type": "text",
