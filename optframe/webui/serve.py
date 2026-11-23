@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any, List, Optional
 from urllib.parse import parse_qs, urlparse
 
-from . import jobs, report
+from . import jobs, report, settings
 
 HERE = Path(__file__).resolve().parent
 STATIC = HERE / "static"
@@ -85,6 +85,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(report.diff_runs(ROOT, cur, prev))
         if rest == ["tasks"]:
             return self._json({"tasks": report.list_tasks(ROOT)})
+        if rest == ["settings"]:
+            return self._json({"settings": settings.load_settings()})
         if rest == ["models"]:
             base = Path("/model")
             items = []
@@ -126,6 +128,9 @@ class Handler(BaseHTTPRequestHandler):
             except jobs.ParamError as exc:
                 return self._json({"error": str(exc)}, 400)
             return self._json(job.to_dict(), 201)
+
+        if len(parts) == 2 and parts[0] == "api" and parts[1] == "settings":
+            return self._json({"settings": settings.save_settings(body or {})})
 
         if len(parts) == 4 and parts[0] == "api" and parts[1] == "jobs" and parts[3] == "cancel":
             ok = jobs.cancel(parts[2])

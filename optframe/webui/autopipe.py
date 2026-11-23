@@ -132,7 +132,8 @@ def eval_fused(task_dir: Path, workdir: Path) -> Dict[str, Any]:
     )
 
 
-def eval_single(task: Dict[str, Any], workdir: Path, *, allow_llm: bool = False) -> Dict[str, Any]:
+def eval_single(task: Dict[str, Any], workdir: Path, *, allow_llm: bool = False,
+                llm: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     op = (task.get("op") or "").lower()
     fixture = REPO / "fixtures" / "silu"
     has_key = bool(os.environ.get("GPUSTACK_API_KEY"))
@@ -144,10 +145,15 @@ def eval_single(task: Dict[str, Any], workdir: Path, *, allow_llm: bool = False)
             workdir,
         )
     if allow_llm and has_key:
+        conf = llm or {}
         return _eval_in_container(
             "optframe.tiers.simple_cli",
-            ["--task", task["dir"], "--generator", "llm", "--n", "1", "--rounds", "1",
-             "--repeat", "20"],
+            ["--task", task["dir"], "--generator", "llm",
+             "--model", str(conf.get("model") or "ds-v4"),
+             "--base-url", str(conf.get("base_url") or "http://10.51.198.60:10152/v1-openai"),
+             "--n", str(int(conf.get("n") or 1)),
+             "--rounds", str(int(conf.get("rounds") or 1)),
+             "--repeat", str(int(conf.get("repeat") or 20))],
             workdir,
         )
     if not allow_llm:
@@ -162,6 +168,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--top-k", type=int, default=5, help="单算子任务最多评测几个")
     ap.add_argument("--single-llm", action="store_true",
                     help="单算子没有 fixture 时用 LLM 生成候选（慢，默认关）")
+    ap.add_argument("--llm-model", default="ds-v4")
+    ap.add_argument("--llm-base-url", default="http://10.51.198.60:10152/v1-openai")
+    ap.add_argument("--llm-n", type=int, default=1)
+    ap.add_argument("--llm-rounds", type=int, default=1)
+    ap.add_argument("--llm-repeat", type=int, default=20)
     ap.add_argument("--out", default=None, help="pipeline_report.json 输出路径")
     args = ap.parse_args(argv)
 
@@ -225,7 +236,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             out["single"]["tasks"].append({
                 **task,
                 "eval": eval_single(task, base / f"eval_single__{task['name']}",
-                                    allow_llm=bool(args.single_llm)),
+                                    allow_llm=bool(args.single_llm),
+                                    llm={"model": args.llm_model, "base_url": args.llm_base_url,
+                                         "n": args.llm_n, "rounds": args.llm_rounds,
+                                         "repeat": args.llm_repeat}),
             })
         print(f"[single] 生成并选中 {len(out['single']['tasks'])} 个（跳过 {len(skipped)}）")
     except Exception as exc:  # noqa: BLE001

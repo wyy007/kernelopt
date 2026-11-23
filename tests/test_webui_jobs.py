@@ -145,3 +145,28 @@ def test_autopipe_builder(tmp_path):
     assert argv[2] == "optframe.webui.autopipe"
     assert argv[argv.index("--report") + 1] == str(report)
     assert argv[argv.index("--top-k") + 1] == "3"
+
+
+def test_autopipe_uses_configured_llm(tmp_path, monkeypatch):
+    report = tmp_path / "bottlenecks.json"
+    report.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        jobs.webui_settings,
+        "load_settings",
+        lambda: {"llm_enabled": True, "llm_model": "ds-v4",
+                 "llm_base_url": "http://x/v1-openai",
+                 "llm_n": 1, "llm_rounds": 1, "llm_repeat": 7},
+    )
+    argv = jobs._build_autopipe({"report": str(report)})
+    assert "--single-llm" in argv
+    assert argv[argv.index("--llm-model") + 1] == "ds-v4"
+    assert argv[argv.index("--llm-repeat") + 1] == "7"
+
+
+def test_autopipe_llm_disabled_skips_flags(tmp_path, monkeypatch):
+    report = tmp_path / "bottlenecks.json"
+    report.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(jobs.webui_settings, "load_settings",
+                        lambda: {"llm_enabled": False})
+    argv = jobs._build_autopipe({"report": str(report)})
+    assert "--single-llm" not in argv

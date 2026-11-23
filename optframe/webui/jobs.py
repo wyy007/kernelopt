@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from . import settings as webui_settings
+
 REPO = Path(os.environ.get("OPTFRAME_REPO", "/model/wyy/optframe")).resolve()
 
 
@@ -254,8 +256,19 @@ def _build_preflight(p: Dict[str, Any]) -> List[str]:
 
 def _build_autopipe(p: Dict[str, Any]) -> List[str]:
     report = _path_in_repo(p["report"])
-    return [_python(), "-m", "optframe.webui.autopipe",
-            "--report", report, "--top-k", str(int(p.get("top_k") or 5))]
+    argv = [_python(), "-m", "optframe.webui.autopipe",
+            "--report", report, "--top-k", str(int(p.get("top_k") or 3))]
+    conf = webui_settings.load_settings()
+    if conf.get("llm_enabled"):
+        argv += [
+            "--single-llm",
+            "--llm-model", str(conf["llm_model"]),
+            "--llm-base-url", str(conf["llm_base_url"]),
+            "--llm-n", str(int(conf["llm_n"])),
+            "--llm-rounds", str(int(conf["llm_rounds"])),
+            "--llm-repeat", str(int(conf["llm_repeat"])),
+        ]
+    return argv
 
 
 ACTIONS: Dict[str, Action] = {
@@ -289,7 +302,7 @@ ACTIONS: Dict[str, Action] = {
             {"name": "report", "label": "bottlenecks.json", "type": "path",
              "placeholder": "runs/<analysis_run>/bottlenecks.json"},
             {"name": "top_k", "label": "单算子任务数", "type": "number",
-             "default": 5, "optional": True},
+             "default": 3, "optional": True},
         ],
         build=_build_autopipe,
     ),

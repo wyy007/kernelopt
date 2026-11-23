@@ -294,6 +294,7 @@ async function loadActions() {
   const box = $('actions');
   let models = [];
   let tasks = [];
+  await loadSettings();
   try {
     const md = await getJSON('/api/models');
     models = md.models || [];
@@ -345,6 +346,32 @@ async function loadActions() {
   } catch (e) {
     box.innerHTML = `<div class="empty">无法加载动作（需要后端 serve.py）：${escapeHtml(String(e))}</div>`;
   }
+}
+
+async function loadSettings() {
+  try {
+    const data = await getJSON('/api/settings');
+    const s = data.settings || {};
+    $('set-llm').checked = !!s.llm_enabled;
+    $('set-model').value = s.llm_model || 'ds-v4';
+    $('set-base').value = s.llm_base_url || '';
+    $('set-repeat').value = s.llm_repeat || 20;
+  } catch (e) { /* 旧后端没有 settings 接口时忽略 */ }
+}
+
+async function saveSettings() {
+  const body = {
+    llm_enabled: $('set-llm').checked,
+    llm_model: $('set-model').value.trim(),
+    llm_base_url: $('set-base').value.trim(),
+    llm_repeat: Number($('set-repeat').value) || 20,
+  };
+  const r = await fetch('/api/settings', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) { alert('保存失败：' + (data.error || r.status)); return; }
+  $('job-log').textContent = '配置已保存：' + JSON.stringify(data.settings || body);
 }
 
 async function submitAction(name, card) {
@@ -413,6 +440,7 @@ function bind() {
   });
   $('q').oninput = (e) => { state.q = e.target.value; if (state.run) renderTable(); };
   $('btn-reload').onclick = boot;
+  $('set-save').onclick = saveSettings;
   const delBtn = $('btn-delete');
   if (delBtn) {
     delBtn.onclick = async () => {

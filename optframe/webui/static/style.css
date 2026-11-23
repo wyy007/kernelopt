@@ -87,6 +87,9 @@ tr:hover td{background:#141817}
 
 /* 运行页表单 */
 #actions .field input.search{flex:1;max-width:none;min-width:180px;margin-left:12px}
+#settings-card .field{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:6px 0}
+#settings-card .field span{white-space:normal;line-height:1.3;max-width:46%}
+#settings-card .field input.search{flex:1;max-width:none;min-width:220px;margin-left:12px}
 #actions .field{display:flex;align-items:center;justify-content:space-between;gap:8px}
 
 #actions .field span{white-space:normal;overflow:visible;text-overflow:clip;max-width:46%;flex:0 0 auto;line-height:1.3}

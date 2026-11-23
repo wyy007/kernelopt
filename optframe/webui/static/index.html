@@ -45,6 +45,15 @@
     </div>
 
     <div class="wrap hidden" id="view-run">
+      <div class="card" id="settings-card">
+        <div class="k">优化配置 · 驱动模型</div>
+        <div class="s">自动流水线用这里的模型生成单算子候选；关掉则只跑 fixture 能覆盖的任务。</div>
+        <div class="field"><span>启用 LLM 优化</span><input type="checkbox" id="set-llm"></div>
+        <div class="field"><span>驱动模型</span><input class="search" id="set-model" placeholder="ds-v4"></div>
+        <div class="field"><span>Base URL</span><input class="search" id="set-base" placeholder="http://10.51.198.60:10152/v1-openai"></div>
+        <div class="field"><span>每任务配对数</span><input class="search" type="number" id="set-repeat" value="20"></div>
+        <div style="margin-top:8px"><button class="btn primary" id="set-save">保存配置</button></div>
+      </div>
       <div id="actions" style="display:grid;grid-template-columns:1fr 1fr;gap:12px"></div>
       <div class="card" style="margin-top:12px">
         <div class="k">任务状态</div>
