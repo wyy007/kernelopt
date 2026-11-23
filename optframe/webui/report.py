@@ -207,7 +207,8 @@ def load_run(root: Path, run_id: str) -> Optional[Dict[str, Any]]:
     if not d.is_dir():
         return None
 
-    payload: Dict[str, Any] = {"id": run_id, "mtime": int(d.stat().st_mtime),
+    payload: Dict[str, Any] = {"id": run_id, "path": str(d.resolve()),
+                               "mtime": int(d.stat().st_mtime),
                                "files": {}, "summary": {}, "rows": [],
                                "ledger": [], "e2e": None, "tasks": None,
                                "archs": [], "arch_source": ""}

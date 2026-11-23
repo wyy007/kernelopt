@@ -205,3 +205,9 @@ def test_list_tasks_scans_task_dirs(tmp_path):
     assert out[0]["name"] == "t1"
     assert out[0]["kind"] == "fused"
     assert out[0]["run"] == "run1"
+
+
+def test_load_run_exposes_path(tmp_path):
+    d = _run(tmp_path, "a", "sm120")
+    run = report.load_run(tmp_path, "a")
+    assert run["path"] == str(d.resolve())

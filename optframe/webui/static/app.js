@@ -103,7 +103,13 @@ async function openRun(id) {
 function renderHeader() {
   const r = state.run || {};
   $('title').textContent = r.id || '-';
-  $('subtitle').textContent = (r.files && r.files.bottlenecks) || '';
+  $('subtitle').textContent = (r.files && (r.files.bottlenecks || r.files.tasks || r.files.trace))
+    || r.path || '';
+  const pathEl = $('s-path');
+  if (pathEl) {
+    pathEl.textContent = r.path ? r.path.replace(/^.*\/runs\//, 'runs/') : '未记录';
+    pathEl.title = r.path || '';
+  }
   const delBtn = $('btn-delete');
   if (delBtn) delBtn.style.display = r.id ? '' : 'none';
   $('chip-run').textContent = r.id || '-';
