@@ -172,10 +172,6 @@ def _build_capture(p: Dict[str, Any]) -> List[str]:
             "--max-used-gb", str(float(p.get("max_used_gb") or 5.0))]
     if p.get("confirm"):
         argv += ["--force-free"]
-    if p.get("kernel_api"):
-        argv += ["--kernel-api"]
-    if p.get("record_shapes"):
-        argv += ["--record-shapes"]
     if p.get("run_id"):
         argv += ["--run-id", str(p["run_id"])]
     return argv
@@ -323,8 +319,9 @@ ACTIONS: Dict[str, Action] = {
     ),
     "capture": Action(
         name="capture", title="采集 trace", needs_gpu=True, danger=True, timeout_s=1800,
-        desc="起 SGLang → 预热 → 采样 → 校验。勾选「独占 GPU」会先停掉容器内的 sglang 服务"
-             "（不动其它进程）；可同时记录 kernel API 日志用于生成 shape hints。",
+        desc="起 SGLang → 预热 → 采样 → 校验。自动处理：量化/MoE 模型会先短采 shape hints，"
+             "profiler 始终记录张量形状（融合检测需要）；勾选「独占 GPU」会先停掉容器内的 "
+             "sglang 服务（不动其它进程），结束后自动关闭。",
         params=[
             {"name": "model", "label": "模型", "type": "select", "source": "models",
              "default": "/model/Qwen3-8B"},
@@ -334,8 +331,6 @@ ACTIONS: Dict[str, Action] = {
             {"name": "num_steps", "label": "采样步数", "type": "number", "default": 30, "optional": True},
             {"name": "mem_fraction", "label": "显存占比", "type": "number", "default": 0.55, "optional": True},
             {"name": "context_length", "label": "上下文长度", "type": "number", "default": 8192, "optional": True},
-            {"name": "kernel_api", "label": "记录 kernel API 日志（供 shape hints）", "type": "bool", "optional": True},
-            {"name": "record_shapes", "label": "记录张量形状（融合检测需要；trace 会大很多）", "type": "bool", "optional": True},
             {"name": "run_id", "label": "运行名", "type": "text",
              "placeholder": "留空自动生成", "optional": True},
             {"name": "confirm", "label": "我确认独占 GPU", "type": "bool", "optional": False},

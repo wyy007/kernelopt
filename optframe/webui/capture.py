@@ -69,6 +69,16 @@ def free_gpu(max_used_gb: float, *, force: bool = False, timeout_s: float = 40.0
     return False, f"停止 sglang 后 GPU 仍被占用（{used:.1f} GB），可能有其它进程"
 
 
+def wants_kernel_api(model_path: Path) -> bool:
+    """按模型配置判断要不要采 kernel API 日志：只有量化/MoE 模型有可补形状的核。"""
+    try:
+        text = (model_path / "config.json").read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return True
+    keys = ('"quantization_config"', '"num_experts"', '"num_local_experts"', '"n_routed_experts"')
+    return any(key in text for key in keys)
+
+
 def wait_health(timeout_s: int = 300) -> bool:
     deadline = time.time() + timeout_s
     while time.time() < deadline:
@@ -199,13 +209,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--num-steps", type=int, default=30)
     ap.add_argument("--max-used-gb", type=float, default=5.0)
     ap.add_argument("--keep-service", action="store_true")
-    ap.add_argument("--record-shapes", action="store_true",
-                    help="让 profiler 记录张量形状（融合检测需要，trace 会大很多、服务会变慢）")
     ap.add_argument("--force-free", action="store_true",
                     help="GPU 被占用时自动停掉容器内的 sglang.launch_server")
-    ap.add_argument("--kernel-api", action="store_true",
-                    help="开启 SGLANG_KERNEL_API_LOGLEVEL=3，落 kernel_api.log 供 shape hints 使用")
+    ap.add_argument("--kernel-api", choices=("auto", "on", "off"), default="auto",
+                    help="是否采 kernel API 日志：auto 时按模型是否量化/MoE 自动决定")
     args = ap.parse_args(argv)
+
+    use_kernel_api = args.kernel_api == "on" or (
+        args.kernel_api == "auto" and wants_kernel_api(Path(args.model))
+    )
 
     run_id = args.run_id or f"trace_ui_{int(time.time())}"
     if not all(c.isalnum() or c in "_-" for c in run_id):
@@ -225,7 +237,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     kernel_api_log = out_dir / "kernel_api.log"
     hints_path = out_dir / "shape_hints.json"
 
-    if args.kernel_api:
+    if use_kernel_api:
         # kernel API 日志会让服务慢一个数量级；单独用一次短压测采形状，避免把
         # profiler 窗口拖到几分钟导致导出超时、trace 被截断。
         print("[0/8] 采 kernel API 形状（短压测，不 profile）…")
@@ -276,8 +288,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("[4/7] start_profile …")
         req = urllib.request.Request(
             f"http://127.0.0.1:{PORT}/start_profile",
-            data=json.dumps({"num_steps": args.num_steps,
-                             "record_shapes": bool(args.record_shapes)}).encode(),
+            data=json.dumps({"num_steps": args.num_steps, "record_shapes": True}).encode(),
             headers={"Content-Type": "application/json"}, method="POST")
         with urllib.request.urlopen(req, timeout=60) as resp:
             resp.read()
@@ -333,9 +344,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                        "seconds": args.seconds, "num_steps": args.num_steps,
                        "mem_fraction": args.mem_fraction,
                        "context_length": args.context_length,
-                       "kernel_api": bool(args.kernel_api),
-                       "record_shapes": bool(args.record_shapes)},
-            "kernel_api": str(kernel_api_log) if args.kernel_api else None,
+                       "kernel_api": bool(use_kernel_api),
+                       "record_shapes": True},
+            "kernel_api": str(kernel_api_log) if use_kernel_api else None,
             "shape_hints": str(hints_path) if hints_path.exists() else None,
             "created_at": round(time.time(), 3),
         }

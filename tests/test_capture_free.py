@@ -41,3 +41,16 @@ def test_trace_stats_retry_recovers(monkeypatch):
     monkeypatch.setattr(cap.time, "sleep", lambda s: None)
     assert cap.trace_stats_retry(Path("x")) == {"ok": 1}
     assert seen["n"] == 3
+
+
+def test_wants_kernel_api_by_model_config(tmp_path):
+    model = tmp_path / "m"
+    model.mkdir()
+    (model / "config.json").write_text('{"architectures": ["LlamaForCausalLM"]}')
+    assert cap.wants_kernel_api(model) is False
+
+    (model / "config.json").write_text('{"quantization_config": {"quant_method": "fp8"}}')
+    assert cap.wants_kernel_api(model) is True
+
+    (model / "config.json").write_text('{"num_experts": 256}')
+    assert cap.wants_kernel_api(model) is True

@@ -59,10 +59,9 @@ def test_e2e_confirm_adds_force_free_and_max_tokens():
 def test_capture_confirm_frees_gpu_and_passes_model_params():
     argv = jobs._build_capture({
         "confirm": True, "mem_fraction": 0.65, "context_length": 4096,
-        "kernel_api": True, "run_id": "trace_x",
+        "run_id": "trace_x",
     })
     assert "--force-free" in argv
-    assert "--kernel-api" in argv
     assert argv[argv.index("--mem-fraction") + 1] == "0.65"
     assert argv[argv.index("--context-length") + 1] == "4096"
     assert argv[argv.index("--run-id") + 1] == "trace_x"
@@ -71,12 +70,6 @@ def test_capture_confirm_frees_gpu_and_passes_model_params():
 def test_capture_requires_confirm():
     with pytest.raises(jobs.ParamError):
         jobs._build_capture({})
-
-
-def test_capture_record_shapes_flag_is_opt_in():
-    assert "--record-shapes" not in jobs._build_capture({"confirm": True})
-    argv = jobs._build_capture({"confirm": True, "record_shapes": True})
-    assert "--record-shapes" in argv
 
 
 def test_analysis_passes_shape_hints_and_model():
