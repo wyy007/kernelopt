@@ -179,7 +179,7 @@ def list_tasks(root: Path) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     if not root.exists():
         return out
-    for run_dir in sorted(root.iterdir()):
+    for run_dir in sorted(root.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
         if not run_dir.is_dir() or run_dir.name.startswith("_"):
             continue
         for task_toml in sorted(run_dir.glob("*/task.toml")):

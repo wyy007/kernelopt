@@ -296,7 +296,7 @@ async function loadActions() {
           if (p.source === 'models' && models.length) {
             opts = models.map((m) => ({ value: m.path, label: m.name }));
           } else if (p.source === 'tasks' && tasks.length) {
-            opts = tasks.map((t) => ({ value: t.path, label: `${t.name} · ${t.kind}` }));
+            opts = tasks.map((t) => ({ value: t.path, label: `${t.name} · ${t.kind} · ${t.run}` }));
           } else if (p.options) {
             opts = p.options.map((o) => ({ value: o, label: o }));
           }
