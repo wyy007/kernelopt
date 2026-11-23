@@ -104,6 +104,8 @@ function renderHeader() {
   const r = state.run || {};
   $('title').textContent = r.id || '-';
   $('subtitle').textContent = (r.files && r.files.bottlenecks) || '';
+  const delBtn = $('btn-delete');
+  if (delBtn) delBtn.style.display = r.id ? '' : 'none';
   $('chip-run').textContent = r.id || '-';
   $('s-kinds').textContent = (r.files ? Object.keys(r.files).join(' / ') : '-');
   const model = r.model || '';
@@ -366,6 +368,19 @@ function bind() {
   });
   $('q').oninput = (e) => { state.q = e.target.value; if (state.run) renderTable(); };
   $('btn-reload').onclick = boot;
+  const delBtn = $('btn-delete');
+  if (delBtn) {
+    delBtn.onclick = async () => {
+      const id = state.run && state.run.id;
+      if (!id) return;
+      if (!confirm(`删除运行 ${id}？\n会移动到 runs/_trash/，可手工恢复。`)) return;
+      const r = await fetch(`/api/runs/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) { alert('删除失败：' + (data.detail || data.error || r.status)); return; }
+      state.run = null;
+      await boot();
+    };
+  }
 }
 
 bind();

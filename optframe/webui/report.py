@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -124,7 +125,7 @@ def scan_runs(root: Path) -> List[Dict[str, Any]]:
     if not root.exists():
         return out
     for d in sorted(root.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
-        if not d.is_dir():
+        if not d.is_dir() or d.name.startswith("_"):
             continue
         kinds: List[str] = []
         for kind, name in _ARTIFACTS:
@@ -153,6 +154,24 @@ def scan_runs(root: Path) -> List[Dict[str, Any]]:
                     entry["arch_source"] = arch_source
         out.append(entry)
     return out
+
+
+def delete_run(root: Path, run_id: str) -> tuple[bool, str]:
+    """把一条 run 移到 runs/_trash/（可恢复），拒绝下划线目录、符号链接与越界路径。"""
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", str(run_id or "")):
+        return False, "run_id 不合法（只允许字母/数字/点/下划线/短横线，且不能以 _ 开头）"
+    root = root.resolve()
+    d = root / run_id
+    if d.is_symlink():
+        return False, "拒绝删除符号链接"
+    d = d.resolve()
+    if d.parent != root or not d.is_dir():
+        return False, "运行不存在或不在 runs/ 下"
+    trash = root / "_trash"
+    trash.mkdir(exist_ok=True)
+    dest = trash / f"{run_id}-{int(time.time())}"
+    d.rename(dest)
+    return True, str(dest)
 
 
 def load_run(root: Path, run_id: str) -> Optional[Dict[str, Any]]:

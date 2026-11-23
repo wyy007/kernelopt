@@ -131,6 +131,14 @@ class Handler(BaseHTTPRequestHandler):
 
         return self._json({"error": "unknown api"}, 404)
 
+    def do_DELETE(self) -> None:  # noqa: N802
+        url = urlparse(self.path)
+        parts = [p for p in url.path.split("/") if p]
+        if len(parts) == 3 and parts[0] == "api" and parts[1] == "runs":
+            ok, msg = report.delete_run(ROOT, parts[2])
+            return self._json({"deleted": ok, "detail": msg}, 200 if ok else 400)
+        return self._json({"error": "unknown api"}, 404)
+
 
 def main(argv: Optional[List[str]] = None) -> int:
     global ROOT

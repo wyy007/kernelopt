@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from optframe.webui import report
 
@@ -172,3 +173,21 @@ def test_model_missing_is_empty(tmp_path):
     (d / "index.json").write_text(json.dumps({"tasks": []}), encoding="utf-8")
     run = report.load_run(tmp_path, "x")
     assert run["model"] == ""
+
+
+def test_delete_run_moves_to_trash(tmp_path):
+    d = _run(tmp_path, "a", "sm120")
+    ok, dest = report.delete_run(tmp_path, "a")
+    assert ok
+    assert Path(dest).parent.name == "_trash"
+    assert not d.exists()
+    assert [r["id"] for r in report.scan_runs(tmp_path)] == []
+
+
+def test_delete_run_rejects_special_names(tmp_path):
+    (tmp_path / "_jobs").mkdir()
+    (tmp_path / "ok").mkdir()
+    assert report.delete_run(tmp_path, "_jobs")[0] is False
+    assert report.delete_run(tmp_path, "../ok")[0] is False
+    assert report.delete_run(tmp_path, "..")[0] is False
+    assert report.delete_run(tmp_path, "missing")[0] is False
