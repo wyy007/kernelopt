@@ -273,6 +273,9 @@ def load_run(root: Path, run_id: str) -> Optional[Dict[str, Any]]:
     if cap is not None:
         payload["files"]["capture"] = str(cap)
         payload["capture"] = _read_json(cap)
+        trace_path = (payload["capture"] or {}).get("trace")
+        if trace_path:
+            payload["files"]["trace"] = str(trace_path)
 
     tasks = _find_artifact(d, "index.json")
     if tasks is not None:

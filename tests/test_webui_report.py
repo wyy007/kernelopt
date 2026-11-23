@@ -153,6 +153,17 @@ def test_model_from_capture(tmp_path):
     assert run["model_source"] == "capture"
 
 
+def test_capture_trace_exposed_as_file(tmp_path):
+    d = tmp_path / "c"
+    d.mkdir()
+    (d / "capture.json").write_text(
+        json.dumps({"model": "/model/Qwen3-8B", "trace": "/model/wyy/optframe/runs/c/x.trace.json.gz"}),
+        encoding="utf-8",
+    )
+    run = report.load_run(tmp_path, "c")
+    assert run["files"]["trace"].endswith("x.trace.json.gz")
+
+
 def test_model_from_service_log(tmp_path):
     d = tmp_path / "e"
     d.mkdir()

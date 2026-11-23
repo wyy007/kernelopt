@@ -239,6 +239,9 @@ function renderReport() {
         ${(cap.trace_stats || {}).kernels || 0} kernel ·
         忙碌 ${(cap.trace_stats || {}).busy_pct || 0}% ·
         ${escapeHtml((cap.load || {}).ok || 0)}/${escapeHtml((cap.load || {}).requests || 0)} 请求</div>
+      <div class="s" style="margin-top:6px;word-break:break-all">profile：${escapeHtml(cap.trace || '—')}</div>
+      ${cap.kernel_api ? `<div class="s" style="word-break:break-all">kernel_api：${escapeHtml(cap.kernel_api)}</div>` : ''}
+      ${cap.shape_hints ? `<div class="s" style="word-break:break-all">shape_hints：${escapeHtml(cap.shape_hints)}</div>` : ''}
       ${cap.trace ? `<div style="margin-top:8px"><button class="btn primary" id="btn-analyze">分析这条 trace</button></div>` : ''}</div>` : '';
 
   const ab = $('btn-analyze');
