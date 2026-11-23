@@ -79,11 +79,18 @@ def wants_kernel_api(model_path: Path) -> bool:
     return any(key in text for key in keys)
 
 
-def wait_health(timeout_s: int = 300) -> bool:
+def wait_health(timeout_s: int = 300, per_request_s: float = 30.0) -> bool:
+    """等 /health 返回 200。
+
+    kernel API 日志开启时，连 1-token 的健康检查 prefill 都要 ~8s；
+    单次请求超时不能设 3s，否则每次都在服务返回前放弃。
+    """
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{PORT}/health", timeout=3) as r:
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{PORT}/health", timeout=per_request_s
+            ) as r:
                 if r.status == 200:
                     return True
         except Exception:  # noqa: BLE001

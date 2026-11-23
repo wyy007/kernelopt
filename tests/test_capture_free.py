@@ -54,3 +54,28 @@ def test_wants_kernel_api_by_model_config(tmp_path):
 
     (model / "config.json").write_text('{"num_experts": 256}')
     assert cap.wants_kernel_api(model) is True
+
+
+def test_wait_health_survives_slow_health_prefill(monkeypatch):
+    calls = {"n": 0}
+
+    class Resp:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def fake_urlopen(url, timeout):
+        calls["n"] += 1
+        assert timeout >= 10  # 不能再是 3s
+        if calls["n"] < 3:
+            raise TimeoutError("health prefill slow")
+        return Resp()
+
+    monkeypatch.setattr(cap.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(cap.time, "sleep", lambda s: None)
+    assert cap.wait_health(timeout_s=5, per_request_s=30) is True
+    assert calls["n"] == 3
