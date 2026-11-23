@@ -106,6 +106,11 @@ function renderHeader() {
   $('subtitle').textContent = (r.files && r.files.bottlenecks) || '';
   $('chip-run').textContent = r.id || '-';
   $('s-kinds').textContent = (r.files ? Object.keys(r.files).join(' / ') : '-');
+  const model = r.model || '';
+  $('s-model').textContent = model ? (model.split('/').filter(Boolean).pop() || model) : '未记录';
+  $('s-model').title = model
+    ? `${model}（来源：${r.model_source || '未记录'}）`
+    : '分析产物/采集记录里没有模型字段';
   $('s-findings').textContent = (r.summary && r.summary.findings) || 0;
   $('s-elig').textContent = (r.summary && r.summary.eligible) || 0;
   $('s-busy').textContent = r.summary && r.summary.gpu_busy != null ? fmt(r.summary.gpu_busy, 1) + '%' : '—';

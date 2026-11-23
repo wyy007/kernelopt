@@ -132,3 +132,43 @@ def test_gate_fires_on_derived_arch(tmp_path):
     out = report.diff_runs(tmp_path, "new", "old")
     assert out["arch_mismatch"] is True
     assert out["arch_note"] == "sm120 vs sm89"
+
+
+def test_model_from_analysis_target(tmp_path):
+    _run(tmp_path, "a", "sm120", hardware="RTX PRO 5000")
+    run = report.load_run(tmp_path, "a")
+    assert run["model"] == "m"
+    assert run["model_source"] == "analysis"
+
+
+def test_model_from_capture(tmp_path):
+    d = tmp_path / "c"
+    d.mkdir()
+    (d / "capture.json").write_text(
+        json.dumps({"model": "/model/Qwen3-8B"}), encoding="utf-8"
+    )
+    run = report.load_run(tmp_path, "c")
+    assert run["model"] == "/model/Qwen3-8B"
+    assert run["model_source"] == "capture"
+
+
+def test_model_from_service_log(tmp_path):
+    d = tmp_path / "e"
+    d.mkdir()
+    (d / "e2e_ab.json").write_text(json.dumps({"verdict": "INCONCLUSIVE"}), encoding="utf-8")
+    (d / "service.log").write_text(
+        "Example: sglang serve --model-path <model> [options]\n"
+        "python3 -m sglang.launch_server --model-path /model/Qwen3-8B --port 40012",
+        encoding="utf-8",
+    )
+    run = report.load_run(tmp_path, "e")
+    assert run["model"] == "/model/Qwen3-8B"
+    assert run["model_source"] == "service.log"
+
+
+def test_model_missing_is_empty(tmp_path):
+    d = tmp_path / "x"
+    d.mkdir()
+    (d / "index.json").write_text(json.dumps({"tasks": []}), encoding="utf-8")
+    run = report.load_run(tmp_path, "x")
+    assert run["model"] == ""

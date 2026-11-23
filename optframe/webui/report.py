@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -90,6 +91,32 @@ def _summary(data: Dict[str, Any]) -> Dict[str, Any]:
         "run_id": data.get("run_id"),
         "target": data.get("target"),
     }
+
+
+def _run_model(run_dir: Path, payload: Dict[str, Any]) -> tuple[str, str]:
+    """尽力还原这条 run 对应的模型：分析产物 > 采集记录 > e2e 记录 > service.log。"""
+    target = ((payload.get("summary") or {}).get("target") or {})
+    if target.get("model"):
+        return str(target["model"]), "analysis"
+    cap = payload.get("capture") or {}
+    if cap.get("model"):
+        return str(cap["model"]), "capture"
+    e2e = payload.get("e2e") or {}
+    if e2e.get("model"):
+        return str(e2e["model"]), "e2e"
+    log = _find_artifact(run_dir, "service.log")
+    if log is not None:
+        try:
+            text = log.read_text(encoding="utf-8", errors="ignore")[:40000]
+        except OSError:
+            text = ""
+        for match in re.finditer(r"--model-path\s+(\S+)", text):
+            cand = match.group(1).strip("'\"")
+            # 跳过 argparse 帮助里的占位符（如 `<model>`）
+            if not cand.startswith("/") or any(ch in cand for ch in "<>{}$"):
+                continue
+            return cand, "service.log"
+    return "", ""
 
 
 def scan_runs(root: Path) -> List[Dict[str, Any]]:
@@ -203,6 +230,10 @@ def load_run(root: Path, run_id: str) -> Optional[Dict[str, Any]]:
     if tasks is not None:
         payload["files"]["tasks"] = str(tasks)
         payload["tasks"] = _read_json(tasks)
+
+    model, model_source = _run_model(d, payload)
+    payload["model"] = model
+    payload["model_source"] = model_source
 
     return payload
 

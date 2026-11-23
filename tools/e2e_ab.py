@@ -302,7 +302,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                       "on_first": n["block"] < o["block"],
                       "lat_ratio": o["p50"] / n["p50"], "rps_ratio": n["rps"] / o["rps"]})
 
-    summary: Dict[str, object] = {"blocks": rows, "pairs": pairs, "order": args.order}
+    summary: Dict[str, object] = {"blocks": rows, "pairs": pairs, "order": args.order,
+                                    "model": args.model}
     summary.update(summarize_pairs(pairs, args.min_gain))
     if pairs:
         lo, hi = summary["lat_ratio_ci"]
