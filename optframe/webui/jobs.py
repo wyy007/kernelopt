@@ -104,6 +104,14 @@ def _build_analysis(p: Dict[str, Any]) -> List[str]:
 
 
 _HINT_OPS = ("gptq_marlin_gemm", "fp8_blockwise_scaled_mm", "outplace_fused_experts")
+#: hints 里的 match 会被 analysis 当正则匹配 finding.op / kernel，必须对准实际核名
+_HINT_MATCH = {
+    "gptq_marlin_gemm": "marlin",
+    "fp8_blockwise_scaled_mm": "fp8_blockwise_scaled_mm",
+    "outplace_fused_experts": "fused_moe",
+}
+#: 默认权重位宽（fp8 权重 = 8 bit）
+_HINT_BITS = {"gptq_marlin_gemm": 4, "fp8_blockwise_scaled_mm": 8, "outplace_fused_experts": 8}
 
 
 def _build_shape_hints(p: Dict[str, Any]) -> List[str]:
@@ -112,15 +120,18 @@ def _build_shape_hints(p: Dict[str, Any]) -> List[str]:
     op = str(p.get("op") or "gptq_marlin_gemm")
     if op not in _HINT_OPS:
         raise ParamError(f"op 只能是 {', '.join(_HINT_OPS)}")
+    match = str(p.get("match") or "").strip() or _HINT_MATCH[op]
+    bits = p.get("weight_bits")
+    bits = _HINT_BITS[op] if bits in (None, "") else int(bits)
     out = str(p.get("out") or f"runs/shape_hints_{int(time.time())}.json").strip()
     if not out.startswith("runs/"):
         raise ParamError("out 必须以 runs/ 开头")
     return [_python(), "tools/extract_kernel_shapes.py",
             "--log", log, "--op", op, "--out", str(REPO / out),
-            "--match", str(p.get("match") or "marlin"),
+            "--match", match,
             "--min-m", str(int(p.get("min_m") or 0)),
             "--max-m", str(int(p.get("max_m") or 0)),
-            "--weight-bits", str(int(p.get("weight_bits") or 4)),
+            "--weight-bits", str(bits),
             "--tag", str(p.get("tag") or "all")]
 
 
@@ -268,10 +279,13 @@ ACTIONS: Dict[str, Action] = {
             {"name": "op", "label": "算子", "type": "select",
              "options": ["gptq_marlin_gemm", "fp8_blockwise_scaled_mm", "outplace_fused_experts"],
              "default": "gptq_marlin_gemm"},
-            {"name": "match", "label": "匹配标记", "type": "text", "default": "marlin", "optional": True},
+            {"name": "match", "label": "匹配标记（hints 绑定的核名正则）", "type": "text",
+             "placeholder": "留空按算子自动：marlin / fp8_blockwise_scaled_mm / fused_moe",
+             "optional": True},
             {"name": "min_m", "label": "最小 M（0=不限）", "type": "number", "default": 0, "optional": True},
             {"name": "max_m", "label": "最大 M（0=不限）", "type": "number", "default": 0, "optional": True},
-            {"name": "weight_bits", "label": "权重位宽", "type": "number", "default": 4, "optional": True},
+            {"name": "weight_bits", "label": "权重位宽（fp8=8 / int4=4，留空按算子）", "type": "number",
+             "optional": True},
             {"name": "out", "label": "输出 JSON", "type": "text",
              "placeholder": "留空自动生成 runs/shape_hints_<ts>.json", "optional": True},
         ],

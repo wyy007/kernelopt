@@ -98,3 +98,25 @@ def test_shape_hints_builds_argv():
 def test_shape_hints_rejects_unknown_op():
     with pytest.raises(jobs.ParamError):
         jobs._build_shape_hints({"log": "runs/c/kernel_api.log", "op": "foo"})
+
+
+def test_shape_hints_auto_match_and_bits_by_op():
+    moe = jobs._build_shape_hints({
+        "log": "runs/c/kernel_api.log", "op": "outplace_fused_experts",
+        "out": "runs/c/h.json",
+    })
+    assert moe[moe.index("--match") + 1] == "fused_moe"
+    assert moe[moe.index("--weight-bits") + 1] == "8"
+
+    marlin = jobs._build_shape_hints({
+        "log": "runs/c/kernel_api.log", "op": "gptq_marlin_gemm", "out": "runs/c/h.json",
+    })
+    assert marlin[marlin.index("--match") + 1] == "marlin"
+    assert marlin[marlin.index("--weight-bits") + 1] == "4"
+
+    custom = jobs._build_shape_hints({
+        "log": "runs/c/kernel_api.log", "op": "fp8_blockwise_scaled_mm",
+        "match": "my_kernel", "weight_bits": 4, "out": "runs/c/h.json",
+    })
+    assert custom[custom.index("--match") + 1] == "my_kernel"
+    assert custom[custom.index("--weight-bits") + 1] == "4"
