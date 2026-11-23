@@ -298,7 +298,7 @@ async function loadActions() {
 
 async function submitAction(name, card) {
   const params = {};
-  card.querySelectorAll('input[data-p]').forEach((i) => {
+  card.querySelectorAll('[data-p]').forEach((i) => {
     if (i.type === 'checkbox') { params[i.dataset.p] = i.checked; }
     else if (i.tagName === 'SELECT') { params[i.dataset.p] = i.value; }
     else if (i.value.trim()) { params[i.dataset.p] = i.value.trim(); }

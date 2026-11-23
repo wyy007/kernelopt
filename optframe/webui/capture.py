@@ -4,7 +4,8 @@
       → 校验 trace 质量 → 关服务 → 写 capture.json
 
 安全：
-    - 起服务前必须确认 GPU 空闲（占用 < `--max-used-gb`），否则直接失败，不尝试杀进程；
+    - 起服务前确认 GPU 空闲（占用 < `--max-used-gb`）；勾选「独占 GPU」时
+      （`--force-free`）只杀本容器的 `sglang.launch_server`，不动其它进程；
     - 只操作本脚本自己起的进程（记录 PID），结束必关；
     - 所有路径在 runs/ 下，run_id 只允许字母数字下划线。
 
@@ -45,6 +46,27 @@ def gpu_used_gb() -> float:
         return float(out.stdout.strip().splitlines()[0]) / 1024.0
     except (ValueError, IndexError):
         return -1.0
+
+
+def free_gpu(max_used_gb: float, *, force: bool = False, timeout_s: float = 40.0) -> tuple[bool, str]:
+    """确保 GPU 空闲；force 时只杀 sglang.launch_server，不碰其它进程。"""
+    used = gpu_used_gb()
+    if used < 0:
+        return False, "读不到 GPU 状态"
+    if used <= max_used_gb:
+        return True, f"GPU 已空闲（{used:.1f} GB）"
+    if not force:
+        return False, f"GPU 不空闲（{used:.1f} GB）；勾选「独占 GPU」可自动停 sglang 服务"
+    print(f"[free] GPU 已用 {used:.1f} GB，停止容器内 sglang.launch_server …")
+    sh(["docker", "exec", CONTAINER, "bash", "-lc",
+        "pkill -9 -f sglang.launch_server || true"], timeout=60)
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        used = gpu_used_gb()
+        if 0 <= used <= max_used_gb:
+            return True, f"已释放 GPU（{used:.1f} GB）"
+        time.sleep(2)
+    return False, f"停止 sglang 后 GPU 仍被占用（{used:.1f} GB），可能有其它进程"
 
 
 def wait_health(timeout_s: int = 300) -> bool:
@@ -141,6 +163,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--num-steps", type=int, default=30)
     ap.add_argument("--max-used-gb", type=float, default=5.0)
     ap.add_argument("--keep-service", action="store_true")
+    ap.add_argument("--force-free", action="store_true",
+                    help="GPU 被占用时自动停掉容器内的 sglang.launch_server")
+    ap.add_argument("--kernel-api", action="store_true",
+                    help="开启 SGLANG_KERNEL_API_LOGLEVEL=3，落 kernel_api.log 供 shape hints 使用")
     args = ap.parse_args(argv)
 
     run_id = args.run_id or f"trace_ui_{int(time.time())}"
@@ -152,16 +178,18 @@ def main(argv: Optional[List[str]] = None) -> int:
     trace_dir = out_dir
     service_log = out_dir / "service.log"
 
-    used = gpu_used_gb()
-    print(f"[1/7] GPU 已用 {used:.1f} GB（阈值 {args.max_used_gb} GB）")
-    if used < 0:
-        print("[FAIL] 读不到 GPU 状态")
-        return 2
-    if used > args.max_used_gb:
-        print(f"[FAIL] GPU 不空闲（{used:.1f} GB 被占用）。请先停掉其他服务再采集。")
+    ok, why = free_gpu(args.max_used_gb, force=args.force_free)
+    print(f"[1/7] {why}")
+    if not ok:
+        print("[FAIL] " + why)
         return 2
 
-    env = (f"SGLANG_TORCH_PROFILER_DIR={trace_dir} "
+    kernel_api_log = out_dir / "kernel_api.log"
+    kernel_env = (
+        f"SGLANG_KERNEL_API_LOGLEVEL=3 SGLANG_KERNEL_API_LOGDEST={kernel_api_log} "
+        if args.kernel_api else ""
+    )
+    env = (f"{kernel_env}SGLANG_TORCH_PROFILER_DIR={trace_dir} "
            f"nohup python3 -m sglang.launch_server --model-path {args.model} "
            f"--host 0.0.0.0 --port {PORT} --tp-size {args.tp} "
            f"--context-length {args.context_length} --mem-fraction-static {args.mem_fraction} "
@@ -219,7 +247,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             "load": load_stats, "trace_stats": stats, "gates": gates, "verdict": verdict,
             "params": {"concurrency": args.concurrency, "isl": args.isl,
                        "seconds": args.seconds, "num_steps": args.num_steps,
-                       "mem_fraction": args.mem_fraction},
+                       "mem_fraction": args.mem_fraction,
+                       "context_length": args.context_length,
+                       "kernel_api": bool(args.kernel_api)},
+            "kernel_api": str(kernel_api_log) if args.kernel_api else None,
             "created_at": round(time.time(), 3),
         }
         (out_dir / "capture.json").write_text(json.dumps(result, ensure_ascii=False, indent=2),

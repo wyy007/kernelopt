@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .capture import CONTAINER, PORT, gpu_used_gb, sh, wait_health
+from .capture import CONTAINER, PORT, free_gpu, gpu_used_gb, sh, wait_health
 
 REPO = Path(os.environ.get("OPTFRAME_REPO", "/model/wyy/optframe")).resolve()
 
@@ -37,6 +37,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--min-gain", type=float, default=1.015,
                     help="最小可判收益（延迟比），透传给 tools/e2e_ab.py")
     ap.add_argument("--max-used-gb", type=float, default=5.0)
+    ap.add_argument("--force-free", action="store_true",
+                    help="GPU 被占用时自动停掉容器内的 sglang.launch_server")
     args = ap.parse_args(argv)
 
     run_id = args.run_id or f"e2e_ui_{int(time.time())}"
@@ -52,10 +54,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     service_log = out_dir / "service.log"
     result_json = out_dir / "e2e_ab.json"
 
-    used = gpu_used_gb()
-    print(f"[1/5] GPU 已用 {used:.1f} GB（阈值 {args.max_used_gb}）")
-    if used < 0 or used > args.max_used_gb:
-        print(f"[FAIL] GPU 不空闲（{used:.1f} GB），请先停掉其他服务")
+    ok, why = free_gpu(args.max_used_gb, force=args.force_free)
+    print(f"[1/5] {why}")
+    if not ok:
+        print("[FAIL] " + why)
         return 2
 
     env = (f"PYTHONPATH={REPO}/delivery OPTFRAME_BACKFILL=1 "

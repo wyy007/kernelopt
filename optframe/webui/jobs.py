@@ -93,9 +93,35 @@ def _build_analysis(p: Dict[str, Any]) -> List[str]:
     trace = _path_in_repo(p["trace"])
     arch = _path_in_repo(p.get("arch") or "arch/RTX_PRO_5000.json")
     run_id = _run_id(p.get("run_id"))
-    return [_python(), "-m", "optframe.analysis.cli",
+    argv = [_python(), "-m", "optframe.analysis.cli",
             "--trace", trace, "--arch", arch, "--workdir", f"runs/{run_id}",
-            "--framework", "sglang", "--model", str(p.get("model") or "qwen3-8b")]
+            "--framework", str(p.get("framework") or "sglang"),
+            "--model", str(p.get("model") or "qwen3-8b")]
+    hints = str(p.get("shape_hints") or "").strip()
+    if hints:
+        argv += ["--shape-hints", _path_in_repo(hints)]
+    return argv
+
+
+_HINT_OPS = ("gptq_marlin_gemm", "fp8_blockwise_scaled_mm", "outplace_fused_experts")
+
+
+def _build_shape_hints(p: Dict[str, Any]) -> List[str]:
+    """从 capture 的 kernel_api.log 提取形状，产出 analysis --shape-hints 文件。"""
+    log = _path_in_repo(p["log"])
+    op = str(p.get("op") or "gptq_marlin_gemm")
+    if op not in _HINT_OPS:
+        raise ParamError(f"op 只能是 {', '.join(_HINT_OPS)}")
+    out = str(p.get("out") or f"runs/shape_hints_{int(time.time())}.json").strip()
+    if not out.startswith("runs/"):
+        raise ParamError("out 必须以 runs/ 开头")
+    return [_python(), "tools/extract_kernel_shapes.py",
+            "--log", log, "--op", op, "--out", str(REPO / out),
+            "--match", str(p.get("match") or "marlin"),
+            "--min-m", str(int(p.get("min_m") or 0)),
+            "--max-m", str(int(p.get("max_m") or 0)),
+            "--weight-bits", str(int(p.get("weight_bits") or 4)),
+            "--tag", str(p.get("tag") or "all")]
 
 
 def _build_fusion_tasks(p: Dict[str, Any]) -> List[str]:
@@ -135,7 +161,12 @@ def _build_capture(p: Dict[str, Any]) -> List[str]:
             "--seconds", str(float(p.get("seconds") or 30)),
             "--num-steps", str(int(p.get("num_steps") or 30)),
             "--mem-fraction", str(float(p.get("mem_fraction") or 0.55)),
+            "--context-length", str(int(p.get("context_length") or 8192)),
             "--max-used-gb", str(float(p.get("max_used_gb") or 5.0))]
+    if p.get("confirm"):
+        argv += ["--force-free"]
+    if p.get("kernel_api"):
+        argv += ["--kernel-api"]
     if p.get("run_id"):
         argv += ["--run-id", str(p["run_id"])]
     return argv
@@ -193,6 +224,8 @@ def _build_e2e(p: Dict[str, Any]) -> List[str]:
             "--max-tokens", str(int(p.get("max_tokens") or 8)),
             "--order", order,
             "--min-gain", f"{min_gain:g}"]
+    if p.get("confirm"):
+        argv += ["--force-free"]
     if p.get("run_id"):
         argv += ["--run-id", str(p["run_id"])]
     return argv
@@ -216,10 +249,33 @@ ACTIONS: Dict[str, Action] = {
              "placeholder": "runs/trace_8b_real/xxx.trace.json.gz"},
             {"name": "arch", "label": "硬件基线", "type": "path",
              "default": "arch/RTX_PRO_5000.json", "optional": True},
+            {"name": "shape_hints", "label": "shape hints（可选）", "type": "path",
+             "placeholder": "runs/shape_hints_xxx.json", "optional": True},
+            {"name": "model", "label": "模型标签", "type": "text",
+             "default": "qwen3-8b", "optional": True},
             {"name": "run_id", "label": "运行名", "type": "text",
              "placeholder": "留空自动生成", "optional": True},
         ],
         build=_build_analysis,
+    ),
+    "shape_hints": Action(
+        name="shape_hints", title="生成 shape hints", needs_gpu=False, timeout_s=300,
+        desc="从采集时打开的 kernel_api.log 里提取自定义核的完整形状，产出 analysis 可直接用的 hints JSON。"
+             "采集时需勾选「记录 kernel API 日志」。",
+        params=[
+            {"name": "log", "label": "kernel_api.log", "type": "path",
+             "placeholder": "runs/<capture_run>/kernel_api.log"},
+            {"name": "op", "label": "算子", "type": "select",
+             "options": ["gptq_marlin_gemm", "fp8_blockwise_scaled_mm", "outplace_fused_experts"],
+             "default": "gptq_marlin_gemm"},
+            {"name": "match", "label": "匹配标记", "type": "text", "default": "marlin", "optional": True},
+            {"name": "min_m", "label": "最小 M（0=不限）", "type": "number", "default": 0, "optional": True},
+            {"name": "max_m", "label": "最大 M（0=不限）", "type": "number", "default": 0, "optional": True},
+            {"name": "weight_bits", "label": "权重位宽", "type": "number", "default": 4, "optional": True},
+            {"name": "out", "label": "输出 JSON", "type": "text",
+             "placeholder": "留空自动生成 runs/shape_hints_<ts>.json", "optional": True},
+        ],
+        build=_build_shape_hints,
     ),
     "fusion_eval": Action(
         name="fusion_eval", title="跑融合评测", needs_gpu=True, ok_codes=(0, 1), timeout_s=3600,
@@ -252,18 +308,21 @@ ACTIONS: Dict[str, Action] = {
             {"name": "seconds", "label": "每块秒数", "type": "number", "default": 20, "optional": True},
             {"name": "concurrency", "label": "并发", "type": "number", "default": 8, "optional": True},
             {"name": "prompt_chars", "label": "提示长度（字符）", "type": "number", "default": 12000, "optional": True},
+            {"name": "max_tokens", "label": "每请求生成 tokens", "type": "number", "default": 8, "optional": True},
             {"name": "order", "label": "块顺序", "type": "select",
              "options": ["alternate", "abba"], "default": "alternate", "optional": True},
             {"name": "min_gain", "label": "最小可判收益", "type": "number",
              "default": 1.015, "optional": True},
+            {"name": "run_id", "label": "运行名", "type": "text",
+             "placeholder": "留空自动生成", "optional": True},
             {"name": "confirm", "label": "我确认独占 GPU", "type": "bool", "optional": False},
         ],
         build=_build_e2e,
     ),
     "capture": Action(
         name="capture", title="采集 trace", needs_gpu=True, danger=True, timeout_s=1800,
-        desc="起 SGLang → 预热 → 采样 → 校验。会独占 GPU 并在结束后关闭服务；"
-             "若显卡被占用会直接失败（不会杀未知进程）。",
+        desc="起 SGLang → 预热 → 采样 → 校验。勾选「独占 GPU」会先停掉容器内的 sglang 服务"
+             "（不动其它进程）；可同时记录 kernel API 日志用于生成 shape hints。",
         params=[
             {"name": "model", "label": "模型", "type": "select", "source": "models",
              "default": "/model/Qwen3-8B"},
@@ -271,6 +330,11 @@ ACTIONS: Dict[str, Action] = {
             {"name": "isl", "label": "输入长度（词）", "type": "number", "default": 400, "optional": True},
             {"name": "seconds", "label": "打流秒数", "type": "number", "default": 30, "optional": True},
             {"name": "num_steps", "label": "采样步数", "type": "number", "default": 30, "optional": True},
+            {"name": "mem_fraction", "label": "显存占比", "type": "number", "default": 0.55, "optional": True},
+            {"name": "context_length", "label": "上下文长度", "type": "number", "default": 8192, "optional": True},
+            {"name": "kernel_api", "label": "记录 kernel API 日志（供 shape hints）", "type": "bool", "optional": True},
+            {"name": "run_id", "label": "运行名", "type": "text",
+             "placeholder": "留空自动生成", "optional": True},
             {"name": "confirm", "label": "我确认独占 GPU", "type": "bool", "optional": False},
         ],
         build=_build_capture,
