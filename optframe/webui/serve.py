@@ -85,6 +85,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(report.diff_runs(ROOT, cur, prev))
         if rest == ["tasks"]:
             return self._json({"tasks": report.list_tasks(ROOT)})
+        if rest == ["keeps"]:
+            return self._json({"keeps": report.list_keeps(ROOT)})
         if rest == ["settings"]:
             return self._json({"settings": settings.load_settings()})
         if rest == ["models"]:

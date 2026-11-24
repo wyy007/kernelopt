@@ -170,3 +170,22 @@ def test_autopipe_llm_disabled_skips_flags(tmp_path, monkeypatch):
                         lambda: {"llm_enabled": False})
     argv = jobs._build_autopipe({"report": str(report)})
     assert "--single-llm" not in argv
+
+
+def test_e2e_keep_builder():
+    argv = jobs._build_e2e_keep({
+        "keep": "runA::fused__swiglu__3508x4096x24576",
+        "confirm": True, "blocks": 8,
+    })
+    assert argv[2] == "optframe.webui.e2e_keep"
+    assert argv[argv.index("--run") + 1] == "runA"
+    assert argv[argv.index("--task") + 1] == "fused__swiglu__3508x4096x24576"
+    assert argv[argv.index("--order") + 1] == "abba"
+    assert "--force-free" in argv
+
+
+def test_e2e_keep_requires_confirm_and_selection():
+    with pytest.raises(jobs.ParamError):
+        jobs._build_e2e_keep({"keep": "runA::task"})
+    with pytest.raises(jobs.ParamError):
+        jobs._build_e2e_keep({"confirm": True, "keep": "bad"})

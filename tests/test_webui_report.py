@@ -231,3 +231,21 @@ def test_load_run_exposes_pipeline(tmp_path):
     )
     run = report.load_run(tmp_path, "a")
     assert run["pipeline"]["summary"]["fused_keep"] == 1
+
+
+def test_list_keeps_only_returns_keep(tmp_path):
+    run = tmp_path / "run1"
+    run.mkdir()
+    (run / "pipeline_report.json").write_text(
+        json.dumps({"fused": {"tasks": [
+            {"name": "k1", "dir": "d1", "coverage_pct": 10,
+             "eval": {"verdict": "KEEP", "ratio": 1.1, "workdir": "w", "source": "s"}},
+            {"name": "r1", "dir": "d2", "coverage_pct": 5,
+             "eval": {"verdict": "REVERT", "ratio": 0.9}},
+        ]}}),
+        encoding="utf-8",
+    )
+    keeps = report.list_keeps(tmp_path)
+    assert len(keeps) == 1
+    assert keeps[0]["task"] == "k1"
+    assert keeps[0]["run"] == "run1"

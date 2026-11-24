@@ -297,6 +297,7 @@ async function loadActions() {
   const box = $('actions');
   let models = [];
   let tasks = [];
+  let keeps = [];
   await loadSettings();
   try {
     const md = await getJSON('/api/models');
@@ -305,6 +306,10 @@ async function loadActions() {
   try {
     const td = await getJSON('/api/tasks');
     tasks = td.tasks || [];
+  } catch (e) { /* 忽略 */ }
+  try {
+    const kd = await getJSON('/api/keeps');
+    keeps = kd.keeps || [];
   } catch (e) { /* 忽略 */ }
   try {
     const data = await getJSON('/api/actions');
@@ -322,6 +327,11 @@ async function loadActions() {
             opts = models.map((m) => ({ value: m.path, label: m.name }));
           } else if (p.source === 'tasks' && tasks.length) {
             opts = tasks.map((t) => ({ value: t.path, label: `${t.name} · ${t.kind} · ${t.run}` }));
+          } else if (p.source === 'keeps' && keeps.length) {
+            opts = keeps.map((k) => ({
+              value: `${k.run}::${k.task}`,
+              label: `${k.task} · ratio ${fmt(k.ratio, 4)} · ${k.run}`,
+            }));
           } else if (p.options) {
             opts = p.options.map((o) => ({ value: o, label: o }));
           }

@@ -112,6 +112,7 @@ def _eval_in_container(module: str, extra: List[str], workdir: Path, timeout: in
         "ratio": rec.get("ratio"),
         "ci": [rec.get("ratio_low"), rec.get("ratio_high")],
         "cache_policy": rec.get("cache_policy"),
+        "source": (rec.get("artifacts") or {}).get("source"),
         "workdir": str(workdir),
         "ledger": str(workdir / "ledger.jsonl"),
         "rc": proc.returncode,

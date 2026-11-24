@@ -39,6 +39,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--max-used-gb", type=float, default=5.0)
     ap.add_argument("--force-free", action="store_true",
                     help="GPU 被占用时自动停掉容器内的 sglang.launch_server")
+    ap.add_argument("--delivery-dir", default=str(REPO / "delivery"),
+                    help="注入包目录（默认仓库 delivery；端到端直跑时用临时 overlay）")
     args = ap.parse_args(argv)
 
     run_id = args.run_id or f"e2e_ui_{int(time.time())}"
@@ -60,7 +62,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("[FAIL] " + why)
         return 2
 
-    env = (f"PYTHONPATH={REPO}/delivery OPTFRAME_BACKFILL=1 "
+    env = (f"PYTHONPATH={args.delivery_dir} OPTFRAME_BACKFILL=1 "
            f"OPTFRAME_FLAG={flag} OPTFRAME_HIT_LOG={hits} "
            f"nohup python3 -m sglang.launch_server --model-path {args.model} "
            f"--host 0.0.0.0 --port {PORT} --tp-size 1 --context-length 8192 "

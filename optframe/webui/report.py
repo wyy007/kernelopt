@@ -202,6 +202,38 @@ def list_tasks(root: Path) -> List[Dict[str, Any]]:
     return out
 
 
+def list_keeps(root: Path) -> List[Dict[str, Any]]:
+    """列出自动流水线里判定 KEEP 的融合任务（供端到端直跑）。"""
+    out: List[Dict[str, Any]] = []
+    if not root.exists():
+        return out
+    for run_dir in sorted(root.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+        if not run_dir.is_dir() or run_dir.name.startswith("_"):
+            continue
+        report = run_dir / "pipeline_report.json"
+        if not report.is_file():
+            continue
+        try:
+            data = json.loads(report.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        for task in (data.get("fused") or {}).get("tasks") or []:
+            ev = task.get("eval") or {}
+            if ev.get("verdict") != "KEEP":
+                continue
+            out.append({
+                "run": run_dir.name,
+                "task": task.get("name"),
+                "task_dir": task.get("dir"),
+                "ratio": ev.get("ratio"),
+                "ci": ev.get("ci"),
+                "coverage": task.get("coverage_pct"),
+                "eval_workdir": ev.get("workdir"),
+                "source": ev.get("source"),
+            })
+    return out
+
+
 def load_run(root: Path, run_id: str) -> Optional[Dict[str, Any]]:
     d = root / run_id
     if not d.is_dir():

@@ -250,6 +250,25 @@ def _build_e2e(p: Dict[str, Any]) -> List[str]:
     return argv
 
 
+def _build_e2e_keep(p: Dict[str, Any]) -> List[str]:
+    if not p.get("confirm"):
+        raise ParamError("需要显式确认（勾选「我确认独占 GPU」）")
+    keep = str(p.get("keep") or "").strip()
+    if "::" not in keep:
+        raise ParamError("请选择一个 KEEP 项")
+    run_id, task = keep.split("::", 1)
+    for value, label in ((run_id, "run"), (task, "task")):
+        if not all(c.isalnum() or c in "_-" for c in value):
+            raise ParamError(f"{label} 名不合法：{value}")
+    return [_python(), "-m", "optframe.webui.e2e_keep",
+            "--run", run_id, "--task", task,
+            "--blocks", str(int(p.get("blocks") or 8)),
+            "--seconds", str(float(p.get("seconds") or 30)),
+            "--concurrency", str(int(p.get("concurrency") or 8)),
+            "--min-gain", str(float(p.get("min_gain") or 1.015)),
+            "--order", "abba", "--force-free"]
+
+
 def _build_preflight(p: Dict[str, Any]) -> List[str]:
     return [_python(), "-m", "optframe.preflight"]
 
@@ -359,6 +378,21 @@ ACTIONS: Dict[str, Action] = {
             {"name": "confirm", "label": "我确认独占 GPU", "type": "bool", "optional": False},
         ],
         build=_build_e2e,
+    ),
+    "e2e_keep": Action(
+        name="e2e_keep", title="端到端（KEEP 直跑）", needs_gpu=True, danger=True,
+        ok_codes=(0, 1), timeout_s=2400,
+        desc="从自动流水线的 KEEP 里选一项：自动把该候选注册到临时 overlay，起 8B 服务跑 "
+             "ABBA 交替块，不动仓库注册表。只需选 KEEP 并勾「独占 GPU」。",
+        params=[
+            {"name": "keep", "label": "KEEP 项", "type": "select", "source": "keeps"},
+            {"name": "blocks", "label": "块数（4 的倍数）", "type": "number", "default": 8, "optional": True},
+            {"name": "seconds", "label": "每块秒数", "type": "number", "default": 30, "optional": True},
+            {"name": "concurrency", "label": "并发", "type": "number", "default": 8, "optional": True},
+            {"name": "min_gain", "label": "最小可判收益", "type": "number", "default": 1.015, "optional": True},
+            {"name": "confirm", "label": "我确认独占 GPU", "type": "bool", "optional": False},
+        ],
+        build=_build_e2e_keep,
     ),
     "capture": Action(
         name="capture", title="采集 trace", needs_gpu=True, danger=True, timeout_s=1800,
